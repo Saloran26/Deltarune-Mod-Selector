@@ -180,6 +180,10 @@ else
     draw_text(_cx, _gh * 0.88, "[Z]/[Enter] Confirm      [X]/[Shift] Back");
 }
 
+// Credit line -- always shown, subtle at the very bottom.
+draw_set_color(c_gray);
+draw_text(_cx, _gh * 0.965, "Mod-Selector by Saloran26  -  made with Claude AI");
+
 draw_set_halign(fa_left);   // restore defaults for other draws
 draw_set_color(c_white);
 
