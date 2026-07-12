@@ -129,3 +129,6 @@ wiederholen. Loader und Mods bleiben erhalten.
 ## Lizenz
 MIT — siehe [LICENSE](LICENSE). Betrifft nur den Code dieses Projekts (Loader +
 Menü-Patch), nicht Deltarune oder Mods.
+
+## Credits
+Erstellt mit Hilfe von **Claude AI** (Anthropic).
