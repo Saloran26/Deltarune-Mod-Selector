@@ -1,0 +1,23 @@
+So fügst du einen Mod hinzu
+===========================
+
+Diesen "mods"-Ordner in deinen Deltarune-Ordner legen (neben DELTARUNE.exe),
+falls er dort noch nicht existiert.
+
+Fuer jeden Mod hier einen Ordner anlegen. Der ORDNERNAME ist der Name, der
+spaeter im Menue erscheint. Darin die Mod-Dateien GENAU SO verschachtelt
+ablegen, wie sie im Spiel liegen wuerden.
+
+Beispiel (ein Kapitel-3-Mod mit gemodeter data.win + Zusatzmusik):
+
+  mods\
+  └─ Kaizo Knight\
+     ├─ chapter3_windows\
+     │  └─ data.win
+     └─ mus\
+        └─ kaizoknight.ogg
+
+Der Loader erkennt am Unterordner "chapter3_windows" automatisch, dass es ein
+Kapitel-3-Mod ist. Fertig — mehr ist nicht noetig.
+
+(Diese Textdatei kannst du loeschen.)

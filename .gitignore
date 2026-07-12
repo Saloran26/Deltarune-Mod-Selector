@@ -1,0 +1,11 @@
+# Niemals Spieldateien oder Mods einchecken (Urheberrecht + groß/binär)
+*.win
+*.winold
+*.ogg
+*.dat
+*.exe
+*.mp4
+
+# Falls jemand echte Mods testweise in mods/ ablegt: nur die Anleitung tracken
+mods/*
+!mods/HIER-MODS-REINLEGEN.txt
