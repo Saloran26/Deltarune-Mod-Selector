@@ -128,12 +128,19 @@ if (!_cancel)
 if (mm_state == ""select"")
 {
     if (up_p())
+    {
         mm_index = ((mm_index - 1) + array_length(mm_names)) mod array_length(mm_names);
+        audio_play_sound(snd_menumove, 50, 0);
+    }
     if (down_p())
+    {
         mm_index = (mm_index + 1) mod array_length(mm_names);
+        audio_play_sound(snd_menumove, 50, 0);
+    }
 
     if (button1_p())
     {
+        audio_play_sound(snd_select, 50, 0);
         var _req = string(mm_chapter) + ""|"";
         if (mm_index == 0)
             _req += ""vanilla"";
@@ -148,6 +155,7 @@ if (mm_state == ""select"")
     }
     else if (_cancel)
     {
+        audio_play_sound(snd_swing, 50, 0);
         // Cancel. The chapter-select is in a post-confirm state (input
         // disabled, scroll off, no native ""back""), so we reset it cleanly by
         // reloading the room -- the same mechanism the game uses elsewhere.
@@ -160,6 +168,7 @@ else if (mm_state == ""waiting"")
 {
     if (_cancel)
     {
+        audio_play_sound(snd_swing, 50, 0);
         // Abort the wait -> same clean reset as cancel.
         if (file_exists(""mod_request.txt""))
             file_delete(""mod_request.txt"");
@@ -194,9 +203,49 @@ draw_set_alpha(1);
 draw_set_color(c_black);
 draw_rectangle(0, 0, _gw, _gh, false);
 
-draw_set_halign(fa_center);
+// === Ornate double frame: outer + inner border, corner brackets & accents ===
 draw_set_color(c_white);
-draw_text(_cx, _gh * 0.16, ""CHAPTER "" + string(mm_chapter));
+var _m = 14;
+draw_rectangle(_m, _m, _gw - _m, _gh - _m, true);
+draw_rectangle(_m + 6, _m + 6, _gw - _m - 6, _gh - _m - 6, true);
+var _b = 24;
+var _o = _m + 6;
+draw_line_width(_o, _o, _o + _b, _o, 3);
+draw_line_width(_o, _o, _o, _o + _b, 3);
+draw_line_width(_gw - _o, _o, _gw - _o - _b, _o, 3);
+draw_line_width(_gw - _o, _o, _gw - _o, _o + _b, 3);
+draw_line_width(_o, _gh - _o, _o + _b, _gh - _o, 3);
+draw_line_width(_o, _gh - _o, _o, _gh - _o - _b, 3);
+draw_line_width(_gw - _o, _gh - _o, _gw - _o - _b, _gh - _o, 3);
+draw_line_width(_gw - _o, _gh - _o, _gw - _o, _gh - _o - _b, 3);
+var _cs = 3;
+draw_rectangle(_m - _cs, _m - _cs, _m + _cs, _m + _cs, false);
+draw_rectangle(_gw - _m - _cs, _m - _cs, _gw - _m + _cs, _m + _cs, false);
+draw_rectangle(_m - _cs, _gh - _m - _cs, _m + _cs, _gh - _m + _cs, false);
+draw_rectangle(_gw - _m - _cs, _gh - _m - _cs, _gw - _m + _cs, _gh - _m + _cs, false);
+
+// Game menu font.
+draw_set_font((global.lang == ""en"") ? 2 : 1);
+draw_set_halign(fa_center);
+
+// === Header: CHAPTER N with flanking rules + yellow diamond accents ===
+var _hy = _gh * 0.12;
+var _htxt = ""CHAPTER "" + string(mm_chapter);
+draw_set_color(c_white);
+draw_text(_cx, _hy, _htxt);
+var _hw = string_width(_htxt) / 2;
+var _ry = _hy + 13;
+draw_line_width(_cx - _hw - 50, _ry, _cx - _hw - 14, _ry, 2);
+draw_line_width(_cx + _hw + 14, _ry, _cx + _hw + 50, _ry, 2);
+draw_set_color(c_yellow);
+var _ds = 4;
+var _lx = _cx - _hw - 56;
+var _rx = _cx + _hw + 56;
+draw_triangle(_lx, _ry - _ds, _lx + _ds, _ry, _lx, _ry + _ds, false);
+draw_triangle(_lx, _ry - _ds, _lx - _ds, _ry, _lx, _ry + _ds, false);
+draw_triangle(_rx, _ry - _ds, _rx + _ds, _ry, _rx, _ry + _ds, false);
+draw_triangle(_rx, _ry - _ds, _rx - _ds, _ry, _rx, _ry + _ds, false);
+draw_set_color(c_white);
 
 if (mm_state == ""waiting"")
 {
@@ -204,28 +253,63 @@ if (mm_state == ""waiting"")
 }
 else
 {
-    draw_text(_cx, _gh * 0.27, ""SELECT MOD"");
-    for (var _i = 0; _i < array_length(mm_names); _i++)
+    draw_text(_cx, _gh * 0.21, ""SELECT MOD"");
+
+    // Scrolling list: only _maxvis rows visible, selection kept centered.
+    var _total = array_length(mm_names);
+    var _rowtop = _gh * 0.31;
+    var _rowbot = _gh * 0.80;
+    var _rowh = 32;
+    var _maxvis = floor((_rowbot - _rowtop) / _rowh);
+    if (_maxvis < 1)
+        _maxvis = 1;
+
+    var _first = 0;
+    if (_total > _maxvis)
     {
-        var _pre = ""    "";
+        _first = mm_index - floor(_maxvis / 2);
+        if (_first < 0)
+            _first = 0;
+        if (_first > _total - _maxvis)
+            _first = _total - _maxvis;
+    }
+    var _last = min(_total, _first + _maxvis);
+
+    var _barw = 210;   // half-width of the selection bar
+    for (var _i = _first; _i < _last; _i++)
+    {
+        var _yy = _rowtop + ((_i - _first) * _rowh);
         if (_i == mm_index)
         {
+            // yellow selection bar + red SOUL heart at its left
             draw_set_color(c_yellow);
-            _pre = ""> "";
+            draw_rectangle(_cx - _barw, _yy - 3, _cx + _barw, _yy + 24, true);
+            draw_sprite_ext(spr_heart, 0, _cx - _barw + 12, _yy + 6, 1, 1, 0, c_white, 1);
+            draw_set_color(c_yellow);
         }
         else
         {
             draw_set_color(c_white);
         }
-        draw_text(_cx, (_gh * 0.40) + (_i * 26), _pre + mm_names[_i]);
+        draw_text(_cx, _yy, mm_names[_i]);
     }
+
+    // Scroll arrows when there are more entries above/below the window.
     draw_set_color(c_white);
-    draw_text(_cx, _gh * 0.88, ""[Z]/[Enter] Confirm      [X]/[Shift] Back"");
+    if (_first > 0)
+        draw_triangle(_cx - 9, _rowtop - 10, _cx + 9, _rowtop - 10, _cx, _rowtop - 22, false);
+    if (_last < _total)
+    {
+        var _by = _rowtop + (_maxvis * _rowh) + 2;
+        draw_triangle(_cx - 9, _by, _cx + 9, _by, _cx, _by + 12, false);
+    }
+
+    draw_text(_cx, _gh * 0.855, ""[Z]/[Enter] Confirm      [X]/[Shift] Back"");
 }
 
-// Credit line -- always shown, subtle at the very bottom.
+// Credit line -- clear above the bottom frame.
 draw_set_color(c_gray);
-draw_text(_cx, _gh * 0.965, ""Mod-Selector by Saloran26  -  made with Claude AI"");
+draw_text(_cx, _gh * 0.90, ""Mod-Selector by Saloran26  -  made with Claude AI"");
 
 draw_set_halign(fa_left);
 draw_set_color(c_white);
