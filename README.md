@@ -44,7 +44,9 @@ miteinander.
 ## 📦 Installation
 
 ### Voraussetzungen
-- **Deltarune** über Steam.
+- **Deltarune** über Steam — die **5-Kapitel-Version, `DELTARUNE v22` (Stand 09.07.2026)**.
+  Deine Version steht im **Titelbildschirm** unten. Der Loader ist versionsunabhängig;
+  nur der Menü-Patch kann bei anderen Versionen ein Nachziehen brauchen.
 - **UndertaleModTool** (kostenlos): https://github.com/UnderminersTeam/UndertaleModTool/releases
 - Windows 10/11 (PowerShell ist bereits dabei).
 
