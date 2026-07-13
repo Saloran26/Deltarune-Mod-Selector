@@ -64,6 +64,11 @@ if (Data.Code.ByName("gml_Object_obj_ui_chapter_Step_0") is not UndertaleCode ui
     ScriptError("gml_Object_obj_ui_chapter_Step_0 not found -- cannot place navigation guard.");
     return;
 }
+if (Data.Code.ByName("gml_Object_obj_ui_version_Draw_0") is not UndertaleCode uiVersionDraw)
+{
+    ScriptError("gml_Object_obj_ui_version_Draw_0 not found -- cannot add title-screen credit.");
+    return;
+}
 if (Data.GameObjects.ByName("obj_modmenu") != null)
 {
     ScriptError("obj_modmenu already exists -- data.win looks already patched. Aborting.");
@@ -105,6 +110,21 @@ if (file_exists(""modlist.txt""))
 ";
 
 string STEP_GML = @"
+var _cancel = button2_p();
+if (!_cancel)
+{
+    if (keyboard_check_pressed(vk_escape))
+    {
+        _cancel = true;
+    }
+    else if (instance_exists(obj_gamecontroller))
+    {
+        var _gp = obj_gamecontroller.gamepad_id;
+        if (gamepad_button_check_pressed(_gp, gp_face2) || gamepad_button_check_pressed(_gp, global.button1))
+            _cancel = true;
+    }
+}
+
 if (mm_state == ""select"")
 {
     if (up_p())
@@ -126,7 +146,7 @@ if (mm_state == ""select"")
 
         mm_state = ""waiting"";
     }
-    else if (button2_p())
+    else if (_cancel)
     {
         // Cancel. The chapter-select is in a post-confirm state (input
         // disabled, scroll off, no native ""back""), so we reset it cleanly by
@@ -138,7 +158,7 @@ if (mm_state == ""select"")
 }
 else if (mm_state == ""waiting"")
 {
-    if (button2_p())
+    if (_cancel)
     {
         // Abort the wait -> same clean reset as cancel.
         if (file_exists(""mod_request.txt""))
@@ -246,6 +266,12 @@ string HOOK_GML = @"
 string GUARD_GML = @"if (variable_global_exists(""modmenu_open"") && global.modmenu_open)
     exit;";
 
+// Title-screen credit: one full-size line directly under "DELTARUNE v22" on the
+// left (same left edge x+16, same color/alpha/font/scale already set above it).
+string VERSION_ANCHOR = "draw_text_transformed(x + 16, y + 40, _version_text, _scale, _scale, 0);";
+string VERSION_CREDIT = VERSION_ANCHOR + "\n"
+    + "draw_text_transformed(x + 16, y + 56, \"Mod-Selector by Saloran26\", _scale, _scale, 0);";
+
 // ----------------------------------------------------------------------------
 //  1) Create obj_modmenu and wire its three events.
 //     EventHandlerFor(...) creates the event + its code entry and returns it.
@@ -288,6 +314,9 @@ string uiChapterText = GetDecompiledText(uiChapterStep);
 importGroup.QueueReplace(uiChoiceStep,  GUARD_GML + "\n" + uiChoiceText);
 importGroup.QueueReplace(uiChapterStep, GUARD_GML + "\n" + uiChapterText);
 
+// Title-screen credit: append a draw line under the version text in obj_ui_version.
+importGroup.QueueFindReplace(uiVersionDraw, VERSION_ANCHOR, VERSION_CREDIT);
+
 importGroup.Import();
 
 ChangeSelection(mm);
@@ -295,7 +324,8 @@ ScriptMessage(
     "Mod menu injected successfully.\n\n" +
     "- obj_modmenu created (Create / Step / Draw GUI)\n" +
     "- show_transition hooked\n" +
-    "- input guards added (obj_ui_choice + obj_ui_chapter)\n\n" +
+    "- input guards added (obj_ui_choice + obj_ui_chapter)\n" +
+    "- title-screen credit added (obj_ui_version)\n\n" +
     "Now: File -> Save As -> data_patched.win (do NOT overwrite the original yet).");
 
 
@@ -343,6 +373,13 @@ ScriptMessage(
        authentic look, add `draw_set_font(<a real hub font asset>);` at the top of
        the Draw GUI code -- pick a font name that exists in this data.win's Fonts
        list (e.g. one starting with `fnt_`).
+
+   (F) Title-screen credit find/replace failed:
+       - Open code entry `gml_Object_obj_ui_version_Draw_0`.
+       - Find the line that draws the version:
+             draw_text_transformed(x + 16, y + 40, _version_text, _scale, _scale, 0);
+       - Paste this line directly AFTER it, then compile:
+             draw_text_transformed(x + 16, y + 56, "Mod-Selector by Saloran26", _scale, _scale, 0);
 
    After any manual fix: File -> Save As -> data_patched.win.
    ============================================================================ */

@@ -69,6 +69,25 @@ if (file_exists("modlist.txt"))
 //  SECTION 2 -- obj_modmenu : STEP event
 //  Code entry: gml_Object_obj_modmenu_Step_0
 // ============================================================================
+// Robust "cancel / back" detection. button2_p() is the game's normal cancel
+// (keyboard X / controller B via the input system). We ALSO poll the gamepad
+// hardware directly and accept Escape, so back works with every controller /
+// Steam Input setup regardless of context quirks.
+var _cancel = button2_p();
+if (!_cancel)
+{
+    if (keyboard_check_pressed(vk_escape))
+    {
+        _cancel = true;
+    }
+    else if (instance_exists(obj_gamecontroller))
+    {
+        var _gp = obj_gamecontroller.gamepad_id;
+        if (gamepad_button_check_pressed(_gp, gp_face2) || gamepad_button_check_pressed(_gp, global.button1))
+            _cancel = true;
+    }
+}
+
 if (mm_state == "select")
 {
     if (up_p())
@@ -91,7 +110,7 @@ if (mm_state == "select")
 
         mm_state = "waiting";
     }
-    else if (button2_p())
+    else if (_cancel)
     {
         // Cancel. After confirming a chapter the select screen has input
         // disabled and no native "back", so we reset it cleanly by reloading
@@ -104,7 +123,7 @@ if (mm_state == "select")
 }
 else if (mm_state == "waiting")
 {
-    if (button2_p())
+    if (_cancel)
     {
         // Abort the wait (e.g. loader not responding) -> same clean reset.
         if (file_exists("mod_request.txt"))
@@ -248,3 +267,15 @@ if (!variable_instance_exists(id, "modmenu_done") || !modmenu_done)
 // ============================================================================
 if (variable_global_exists("modmenu_open") && global.modmenu_open)
     exit;
+
+
+// ============================================================================
+//  SECTION 6 -- TITLE-SCREEN CREDIT
+//  Injected into gml_Object_obj_ui_version_Draw_0, right AFTER the line that
+//  draws the version ("DELTARUNE v22"). Draws one full-size credit line directly
+//  under the version text (same left edge x+16), matching the footer's
+//  color/alpha/font/scale (already set above the anchor line).
+//  Anchor line to insert after:
+//      draw_text_transformed(x + 16, y + 40, _version_text, _scale, _scale, 0);
+// ============================================================================
+draw_text_transformed(x + 16, y + 56, "Mod-Selector by Saloran26", _scale, _scale, 0);
