@@ -10,7 +10,11 @@
 //  Loader contract (signal files live in %LOCALAPPDATA%\DELTARUNE, which is
 //  exactly where GML bare filenames resolve -- see findings hub-chapter-select):
 //    * modlist.txt      -> written by loader; lines "N|Name" (N = chapter int).
-//    * mod_request.txt   -> WE write it; one line "N|Name" or "N|vanilla".
+//    * profiles.txt      -> written by loader; lines "N|ProfileName" (save profiles
+//                           that already exist for chapter N).
+//    * mod_request.txt   -> WE write it; one line "N|Name|Profile". Name is a mod
+//                           name or "vanilla"; Profile is empty for "Standard-Saves"
+//                           (real saves, no swap) or a profile name to swap in.
 //    * mod_ready.txt     -> loader writes "ok" when files are swapped in; we poll
 //                           file_exists("mod_ready.txt").
 //
@@ -39,7 +43,21 @@ global.modmenu_open = true;
 mm_parent  = global.modmenu_parent;   // the obj_CHAPTER_SELECT instance id
 mm_chapter = global.modmenu_chapter;  // int chapter number chosen in the hub
 mm_index   = 0;
-mm_state   = "select";                // "select" -> "waiting"
+// Flow of states:
+//   "select"        -> pick a mod (or Vanilla)
+//   "profile"       -> pick a save profile (Standard / existing / + new)
+//   "naming"        -> type a name for a brand-new profile
+//   "confirmdelete" -> hold-to-confirm deleting the highlighted profile
+//   "profilewait"   -> wait for the loader to create/delete a profile folder
+//   "waiting"       -> request written, waiting for the loader to swap files & launch
+mm_state   = "select";
+mm_mod     = "";       // mod chosen in "select" ("vanilla" or a mod name, for the request)
+mm_moddisp = "";       // mod display label (index 0 -> "Vanilla"), used in UI + name suggestion
+mm_pidx    = 0;        // index into mm_profiles while in "profile"
+mm_newname = "";       // name being typed in "naming"
+mm_target  = "";       // profile name being created/deleted (for the "profilewait" refresh)
+mm_wait    = "";       // "create" or "delete" -> how "profilewait" should re-select afterwards
+mm_holdt   = 0;        // accumulated hold time (ms) in "confirmdelete"
 
 // mm_names = ["Vanilla", ...mods for this chapter]
 mm_names = ["Vanilla"];
@@ -63,6 +81,30 @@ if (file_exists("modlist.txt"))
     file_text_close(_f);
 }
 // If modlist.txt is missing, mm_names stays ["Vanilla"] -> menu still usable.
+
+// mm_profiles = ["Standard-Saves", ...saved profiles for this chapter, "+ New Profile"]
+// "Standard-Saves" (index 0) plays on the real saves; the loader treats an empty
+// profile field as "no swap". The last entry starts the name-entry flow.
+mm_profiles = ["Standard-Saves"];
+if (file_exists("profiles.txt"))
+{
+    var _pf = file_text_open_read("profiles.txt");
+    while (!file_text_eof(_pf))
+    {
+        var _pl = file_text_read_string(_pf);
+        file_text_readln(_pf);
+        var _psep = string_pos("|", _pl);
+        if (_psep > 0)
+        {
+            var _pn  = real(string_copy(_pl, 1, _psep - 1));
+            var _pnm = string_copy(_pl, _psep + 1, string_length(_pl) - _psep);
+            if (_pn == mm_chapter)
+                array_push(mm_profiles, _pnm);
+        }
+    }
+    file_text_close(_pf);
+}
+array_push(mm_profiles, "+ New Profile");
 
 
 // ============================================================================
@@ -104,18 +146,11 @@ if (mm_state == "select")
     if (button1_p())
     {
         audio_play_sound(snd_select, 50, 0);
-        // Confirm -> write mod_request.txt, then wait for the loader.
-        var _req = string(mm_chapter) + "|";
-        if (mm_index == 0)
-            _req += "vanilla";
-        else
-            _req += mm_names[mm_index];
-
-        var _wf = file_text_open_write("mod_request.txt");
-        file_text_write_string(_wf, _req);
-        file_text_close(_wf);
-
-        mm_state = "waiting";
+        // Remember the chosen mod, then move on to the save-profile picker.
+        mm_mod     = (mm_index == 0) ? "vanilla" : mm_names[mm_index];
+        mm_moddisp = mm_names[mm_index];   // display label (index 0 -> "Vanilla")
+        mm_pidx = 0;
+        mm_state = "profile";
     }
     else if (_cancel)
     {
@@ -127,6 +162,204 @@ if (mm_state == "select")
         global.modmenu_open = false;
         instance_destroy();
         room_restart();
+    }
+}
+else if (mm_state == "profile")
+{
+    if (up_p())
+    {
+        mm_pidx = ((mm_pidx - 1) + array_length(mm_profiles)) mod array_length(mm_profiles);
+        audio_play_sound(snd_menumove, 50, 0);
+    }
+    if (down_p())
+    {
+        mm_pidx = (mm_pidx + 1) mod array_length(mm_profiles);
+        audio_play_sound(snd_menumove, 50, 0);
+    }
+
+    // A profile row (not "Standard-Saves" at 0, not "+ New Profile" at the end)
+    // can be deleted. Deleting is deliberately two-step: press the DELETE key
+    // (keyboard Del / controller Y) to arm, then HOLD confirm in "confirmdelete".
+    var _deletable = (mm_pidx > 0) && (mm_pidx < array_length(mm_profiles) - 1);
+    var _delkey = keyboard_check_pressed(vk_delete);
+    if (!_delkey && instance_exists(obj_gamecontroller))
+    {
+        var _gpd = obj_gamecontroller.gamepad_id;
+        if (gamepad_button_check_pressed(_gpd, gp_face4))   // Y / triangle
+            _delkey = true;
+    }
+
+    if (button1_p())
+    {
+        if (mm_pidx == array_length(mm_profiles) - 1)
+        {
+            // "+ New Profile" -> type a name, pre-filled with the mod name as a
+            // suggestion (editable). We do NOT launch here: creating returns to
+            // this list so the profile can be reviewed / loaded / deleted.
+            audio_play_sound(snd_menumove, 50, 0);
+            mm_newname = mm_moddisp;
+            keyboard_string = mm_moddisp;   // prefill the text field with the suggestion
+            mm_state = "naming";
+        }
+        else
+        {
+            audio_play_sound(snd_select, 50, 0);
+            // Profile index 0 == "Standard-Saves" -> empty profile field (no swap).
+            var _prof = (mm_pidx == 0) ? "" : mm_profiles[mm_pidx];
+            var _req  = string(mm_chapter) + "|" + mm_mod + "|" + _prof;
+            var _wf = file_text_open_write("mod_request.txt");
+            file_text_write_string(_wf, _req);
+            file_text_close(_wf);
+            mm_state = "waiting";
+        }
+    }
+    else if (_delkey && _deletable)
+    {
+        audio_play_sound(snd_menumove, 50, 0);
+        mm_target = mm_profiles[mm_pidx];   // remember which profile to delete
+        mm_holdt  = 0;
+        mm_state  = "confirmdelete";
+    }
+    else if (_cancel)
+    {
+        audio_play_sound(snd_swing, 50, 0);
+        mm_state = "select";   // back to the mod list
+    }
+}
+else if (mm_state == "naming")
+{
+    // Free text entry. keyboard_string tracks typed characters (incl. backspace).
+    // Confirm is ENTER only and cancel is ESC only, so the letters Z/X used for
+    // confirm/back elsewhere can be typed into the name normally.
+    mm_newname = keyboard_string;
+
+    if (keyboard_check_pressed(vk_enter))
+    {
+        // Sanitize to a safe folder name: keep letters/digits/space/-/_ only,
+        // drop leading spaces, then trim trailing spaces and cap the length.
+        var _clean = "";
+        var _len = string_length(mm_newname);
+        for (var _ci = 1; _ci <= _len; _ci++)
+        {
+            var _ch = string_char_at(mm_newname, _ci);
+            var _o  = ord(_ch);
+            var _ok = (_o >= 48 && _o <= 57) || (_o >= 65 && _o <= 90) ||
+                      (_o >= 97 && _o <= 122) || _ch == "-" || _ch == "_" ||
+                      (_ch == " " && string_length(_clean) > 0);
+            if (_ok && string_length(_clean) < 24)
+                _clean += _ch;
+        }
+        while (string_length(_clean) > 0 && string_char_at(_clean, string_length(_clean)) == " ")
+            _clean = string_copy(_clean, 1, string_length(_clean) - 1);
+
+        if (string_length(_clean) > 0)
+        {
+            audio_play_sound(snd_select, 50, 0);
+            // Ask the loader to CREATE the (empty) profile folder. We do NOT
+            // launch -- afterwards we return to the profile list with the new
+            // profile selected, so the user chooses when to actually play it.
+            mm_target = _clean;
+            mm_wait   = "create";
+            var _cf = file_text_open_write("profile_cmd.txt");
+            file_text_write_string(_cf, "create|" + string(mm_chapter) + "|" + _clean);
+            file_text_close(_cf);
+            mm_state = "profilewait";
+        }
+        // Empty/invalid name -> stay in naming (nothing written).
+    }
+    else if (keyboard_check_pressed(vk_escape))
+    {
+        audio_play_sound(snd_swing, 50, 0);
+        mm_state = "profile";   // back to the profile list
+    }
+}
+else if (mm_state == "confirmdelete")
+{
+    // Two-step safety: DELETE was already pressed to get here; now the confirm
+    // button must be HELD ~1s (progress bar fills). Releasing resets the bar;
+    // cancel (X / B / Esc) aborts entirely. Only then is the profile removed.
+    var _hold = keyboard_check(vk_enter) || keyboard_check(ord("Z"));
+    if (!_hold && instance_exists(obj_gamecontroller))
+    {
+        var _gph = obj_gamecontroller.gamepad_id;
+        if (gamepad_button_check(_gph, gp_face1))   // A / cross held
+            _hold = true;
+    }
+
+    if (_cancel)
+    {
+        audio_play_sound(snd_swing, 50, 0);
+        mm_state = "profile";
+    }
+    else if (_hold)
+    {
+        mm_holdt += delta_time / 1000;   // delta_time is microseconds -> ms
+        if (mm_holdt >= 3000)            // hold ~3 seconds to actually delete
+        {
+            // Heavy "hit": the Hub's slash sound, pitched down for impact.
+            // (extended audio_play_sound: index, priority, loop, gain, offset, pitch)
+            audio_play_sound(snd_swing, 100, false, 1.2, 0, 0.55);
+            mm_wait = "delete";
+            var _df = file_text_open_write("profile_cmd.txt");
+            file_text_write_string(_df, "delete|" + string(mm_chapter) + "|" + mm_target);
+            file_text_close(_df);
+            mm_state = "profilewait";
+        }
+    }
+    else
+    {
+        mm_holdt = 0;   // let go -> reset the bar
+    }
+}
+else if (mm_state == "profilewait")
+{
+    // Loader is creating/deleting a profile folder. When it signals ready, rebuild
+    // the profile list from the refreshed profiles.txt and return to "profile".
+    if (file_exists("profile_ready.txt"))
+    {
+        if (file_exists("profile_cmd.txt"))
+            file_delete("profile_cmd.txt");
+        file_delete("profile_ready.txt");
+
+        mm_profiles = ["Standard-Saves"];
+        if (file_exists("profiles.txt"))
+        {
+            var _rf = file_text_open_read("profiles.txt");
+            while (!file_text_eof(_rf))
+            {
+                var _rl = file_text_read_string(_rf);
+                file_text_readln(_rf);
+                var _rs = string_pos("|", _rl);
+                if (_rs > 0)
+                {
+                    var _rn  = real(string_copy(_rl, 1, _rs - 1));
+                    var _rnm = string_copy(_rl, _rs + 1, string_length(_rl) - _rs);
+                    if (_rn == mm_chapter)
+                        array_push(mm_profiles, _rnm);
+                }
+            }
+            file_text_close(_rf);
+        }
+        array_push(mm_profiles, "+ New Profile");
+
+        // Re-select sensibly: created -> highlight the new profile; deleted ->
+        // keep the cursor in range.
+        mm_pidx = 0;
+        if (mm_wait == "create")
+        {
+            for (var _pi = 0; _pi < array_length(mm_profiles); _pi++)
+            {
+                if (mm_profiles[_pi] == mm_target)
+                {
+                    mm_pidx = _pi;
+                    break;
+                }
+            }
+        }
+        if (mm_pidx > array_length(mm_profiles) - 1)
+            mm_pidx = array_length(mm_profiles) - 1;
+
+        mm_state = "profile";
     }
 }
 else if (mm_state == "waiting")
@@ -227,13 +460,80 @@ if (mm_state == "waiting")
 {
     draw_text(_cx, _gh * 0.45, "Loading mod...");
 }
+else if (mm_state == "naming")
+{
+    draw_text(_cx, _gh * 0.21, "NAME NEW PROFILE");
+    draw_set_color(c_silver);
+    draw_text(_cx, _gh * 0.27, "Mod: " + mm_moddisp);
+    draw_set_color(c_white);
+
+    // Text field with a blinking caret.
+    var _disp = mm_newname;
+    if ((current_time div 500) mod 2 == 0)
+        _disp += "|";
+    var _fw = 230;
+    draw_set_color(c_yellow);
+    draw_rectangle(_cx - _fw, _gh * 0.45 - 4, _cx + _fw, _gh * 0.45 + 26, true);
+    draw_set_color(c_white);
+    draw_text(_cx, _gh * 0.45, _disp);
+
+    draw_text(_cx, _gh * 0.855, "Type a name    [Enter] Create    [X]/[Esc] Back");
+}
+else if (mm_state == "confirmdelete")
+{
+    var _prog = mm_holdt / 3000;
+    if (_prog > 1) _prog = 1;
+
+    // Screen-shake that intensifies as the hold fills.
+    var _mag = 10 * _prog;
+    var _shx = random_range(-_mag, _mag);
+    var _shy = random_range(-_mag, _mag);
+
+    draw_set_color(c_red);
+    draw_text(_cx + _shx, _gh * 0.21 + _shy, "DELETE PROFILE");
+    draw_set_color(c_yellow);
+    draw_text(_cx + _shx, _gh * 0.32 + _shy, mm_target);
+    draw_set_color(c_white);
+    draw_text(_cx + _shx, _gh * 0.40 + _shy, "This erases its saves. This cannot be undone.");
+
+    // Hold-to-confirm bar (also shaken).
+    var _bw = 220;
+    var _bx = _cx + _shx;
+    var _by2 = _gh * 0.52 + _shy;
+    draw_set_color(c_white);
+    draw_rectangle(_bx - _bw, _by2 - 10, _bx + _bw, _by2 + 10, true);
+    draw_set_color(c_red);
+    draw_rectangle(_bx - _bw + 2, _by2 - 8, _bx - _bw + 2 + (2 * _bw - 4) * _prog, _by2 + 8, false);
+    draw_set_color(c_white);
+
+    draw_text(_cx, _gh * 0.855, "HOLD [Z]/[A] to delete  (3s)     [X]/[Esc] Cancel");
+}
+else if (mm_state == "profilewait")
+{
+    draw_text(_cx, _gh * 0.45, "Please wait...");
+}
 else
 {
-    draw_text(_cx, _gh * 0.21, "SELECT MOD");
+    // "select" (mod list) and "profile" (save-profile list) share one renderer.
+    var _isprofile = (mm_state == "profile");
+    var _list = _isprofile ? mm_profiles : mm_names;
+    var _sel  = _isprofile ? mm_pidx     : mm_index;
+
+    if (_isprofile)
+    {
+        draw_text(_cx, _gh * 0.21, "SELECT SAVE PROFILE");
+        draw_set_color(c_silver);
+        draw_text(_cx, _gh * 0.265, "Mod: " + mm_moddisp);
+        draw_set_color(c_white);
+    }
+    else
+    {
+        draw_text(_cx, _gh * 0.21, "SELECT MOD");
+    }
 
     // Scrolling list: only _maxvis rows visible, selection kept centered.
-    var _total = array_length(mm_names);
-    var _rowtop = _gh * 0.31;
+    var _total = array_length(_list);
+    var _rowtop = _gh * (_isprofile ? 0.33 : 0.31);
     var _rowbot = _gh * 0.80;
     var _rowh = 32;
     var _maxvis = floor((_rowbot - _rowtop) / _rowh);
@@ -243,7 +543,7 @@ else
     var _first = 0;
     if (_total > _maxvis)
     {
-        _first = mm_index - floor(_maxvis / 2);
+        _first = _sel - floor(_maxvis / 2);
         if (_first < 0)
             _first = 0;
         if (_first > _total - _maxvis)
@@ -255,7 +555,7 @@ else
     for (var _i = _first; _i < _last; _i++)
     {
         var _yy = _rowtop + ((_i - _first) * _rowh);
-        if (_i == mm_index)
+        if (_i == _sel)
         {
             // yellow selection bar + red SOUL heart at its left
             draw_set_color(c_yellow);
@@ -267,7 +567,7 @@ else
         {
             draw_set_color(c_white);
         }
-        draw_text(_cx, _yy, mm_names[_i]);
+        draw_text(_cx, _yy, _list[_i]);
     }
 
     // Scroll arrows when there are more entries above/below the window.
@@ -280,12 +580,15 @@ else
         draw_triangle(_cx - 9, _by, _cx + 9, _by, _cx, _by + 12, false);
     }
 
-    draw_text(_cx, _gh * 0.855, "[Z]/[Enter] Confirm      [X]/[Shift] Back");
+    if (_isprofile && (_sel > 0) && (_sel < _total - 1))
+        draw_text(_cx, _gh * 0.855, "[Z] Confirm    [Del]/[Y] Delete    [X] Back");
+    else
+        draw_text(_cx, _gh * 0.855, "[Z]/[Enter] Confirm      [X]/[Shift] Back");
 }
 
 // Credit line -- clear above the bottom frame.
 draw_set_color(c_gray);
-draw_text(_cx, _gh * 0.90, "Mod-Selector by Saloran26  -  made with Claude AI");
+draw_text(_cx, _gh * 0.90, "Mod-Selector v1.1.0 by Saloran26  -  made with Claude AI");
 
 draw_set_halign(fa_left);   // restore defaults for other draws
 draw_set_color(c_white);
@@ -362,4 +665,4 @@ if (variable_global_exists("modmenu_open") && global.modmenu_open)
 //  Anchor line to insert after:
 //      draw_text_transformed(x + 16, y + 40, _version_text, _scale, _scale, 0);
 // ============================================================================
-draw_text_transformed(x + 16, y + 56, "Mod-Selector by Saloran26", _scale, _scale, 0);
+draw_text_transformed(x + 16, y + 56, "Mod-Selector v1.1.0 by Saloran26", _scale, _scale, 0);

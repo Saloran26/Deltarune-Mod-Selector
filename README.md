@@ -5,6 +5,12 @@ normal über Steam — beim Auswählen eines Kapitels erscheint ein Menü, in de
 zwischen **Vanilla** und deinen installierten **Mods** wählst (Tastatur **oder**
 Controller). Ist für ein Kapitel kein Mod installiert, startet es ganz normal.
 
+Nach der Mod-Auswahl wählst du zusätzlich ein **Save-Profil**: entweder deine
+normalen **Standard-Saves** oder ein eigenes benanntes Profil (eigene 3
+Speicherplätze für dieses Kapitel). Deine echten Spielstände bleiben dabei
+geschützt — Profil-Fortschritt landet im Profil, deine Standard-Saves werden nach
+dem Spielen automatisch wiederhergestellt.
+
 Neue Mods hinzufügen = einen Ordner in `mods/` legen. Fertig. Deine
 Original-Spieldateien werden **nie dauerhaft** verändert — bei jedem Start wird
 sauber auf Vanilla zurückgesetzt.
@@ -32,7 +38,9 @@ Zwei Teile arbeiten zusammen:
 1. **Loader** (`Loader/`) — ein kleines PowerShell-Skript, das über die
    Steam-Startoptionen vorgeschaltet wird. Es scannt deinen `mods/`-Ordner,
    tauscht beim Mod-Start die passenden Dateien ein und stellt danach Vanilla
-   wieder her. Läuft unsichtbar im Hintergrund.
+   wieder her. Er verwaltet außerdem die **Save-Profile**: er sichert deine
+   echten Spielstände weg, spielt das gewählte Profil ein und stellt deine Saves
+   nach dem Beenden wieder her. Läuft unsichtbar im Hintergrund.
 2. **Menü-Patch** (`Patch/`) — wird einmalig mit *UndertaleModTool* in die
    Spieldatei `data.win` eingebaut und zeigt das Auswahlmenü beim Kapitelstart.
 
@@ -110,7 +118,33 @@ Der Loader erkennt am Ordner `chapterN_windows` automatisch das Kapitel. Fertig.
 - Normal über Steam starten.
 - Kapitel wählen → wenn Mods da sind, erscheint das Menü:
   **↑/↓** wählen · **Z / Enter** Bestätigen · **X / Shift** (Controller-B) Zurück.
-- Kein Mod für das Kapitel → startet direkt normal.
+- **1. Mod wählen** (Vanilla oder ein Mod).
+- **2. Save-Profil wählen:**
+  - **Standard-Saves** — spielt auf deinen ganz normalen Spielständen weiter (**Z** startet).
+  - **ein vorhandenes Profil** — **Z** lädt dessen 3 Speicherplätze und startet.
+  - **+ New Profile** — Name eintippen (der Mod-Name ist als Vorschlag schon
+    vorausgefüllt), **Enter** legt ein neues, leeres Profil an. Es wird **nicht**
+    sofort gestartet — du landest wieder in der Liste mit dem neuen Profil markiert
+    und startest es dann bewusst mit **Z**.
+  - **Profil löschen:** markiertes Profil → **Entf** (Controller **Y**) → dann zur
+    Sicherheit **Z / A ~3 s gedrückt halten** (der Bildschirm wackelt, Balken füllt
+    sich); Loslassen oder **X** bricht ab. Beim Löschen ertönt ein wuchtiger Hit.
+- Kein Mod für das Kapitel → startet direkt normal (ohne Profil-Auswahl).
+
+## 💾 Save-Profile
+Ein Profil ist ein eigener Satz der **3 Speicherplätze eines Kapitels**. So kannst
+du z. B. einen Mod ausprobieren, ohne deinen echten Spielstand zu überschreiben,
+oder mehrere getrennte Durchläufe parallel führen.
+
+- Deine **Standard-Saves** sind immer geschützt: sobald du ein Profil spielst,
+  werden sie weggesichert und nach dem Beenden automatisch zurückgespielt.
+- Fortschritt in einem Profil wird beim Verlassen des Kapitels **in das Profil**
+  gespeichert (nicht in deine echten Saves).
+- Profile liegen im Deltarune-Ordner unter `_saveprofiles\ch<N>\<Name>\` und sind
+  pro Kapitel getrennt. **Löschen** geht direkt im Menü (Entf/Y + Halten) oder indem
+  du den Profil-Ordner löschst.
+- Profile sind unabhängig vom Mod: dasselbe Profil funktioniert mit Vanilla und
+  jedem Mod desselben Kapitels.
 
 ## 🔄 Nach einem Deltarune-Update
 Steam ersetzt die `data.win` durch das Original → **Schritt 2** einmal
@@ -125,6 +159,12 @@ wiederholen. Loader und Mods bleiben erhalten.
   patchen.) Gibt es Mods für das Kapitel?
 - **Mod fehlt im Menü:** Enthält der Mod-Ordner einen `chapterN_windows`-Unterordner
   und liegt er direkt unter `mods\`?
+- **Profil-Auswahl fehlt / kein „SELECT SAVE PROFILE":** Die `data.win` ist noch
+  die alte gepatchte Version — nach diesem Update den Menü-Patch (**Schritt 2**)
+  einmal neu einbauen.
+- **Meine echten Saves sind weg / verändert:** Beim nächsten normalen Start stellt
+  der Loader sie automatisch wieder her (auch nach einem Absturz). Ein wegge-
+  sicherter Stand liegt notfalls in `_savebackup\` im Deltarune-Ordner.
 
 ---
 
