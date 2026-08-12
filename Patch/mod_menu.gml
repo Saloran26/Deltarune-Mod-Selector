@@ -588,7 +588,7 @@ else
 
 // Credit line -- clear above the bottom frame.
 draw_set_color(c_gray);
-draw_text(_cx, _gh * 0.90, "Mod-Selector v1.1.0 by Saloran26  -  made with Claude AI");
+draw_text(_cx, _gh * 0.90, "Mod-Selector v1.2.0 by Saloran26  -  made with Claude AI");
 
 draw_set_halign(fa_left);   // restore defaults for other draws
 draw_set_color(c_white);
@@ -665,4 +665,4 @@ if (variable_global_exists("modmenu_open") && global.modmenu_open)
 //  Anchor line to insert after:
 //      draw_text_transformed(x + 16, y + 40, _version_text, _scale, _scale, 0);
 // ============================================================================
-draw_text_transformed(x + 16, y + 56, "Mod-Selector v1.1.0 by Saloran26", _scale, _scale, 0);
+draw_text_transformed(x + 16, y + 56, "Mod-Selector v1.2.0 by Saloran26", _scale, _scale, 0);

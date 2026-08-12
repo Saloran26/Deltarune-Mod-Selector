@@ -583,7 +583,7 @@ else
 
 // Credit line -- clear above the bottom frame.
 draw_set_color(c_gray);
-draw_text(_cx, _gh * 0.90, ""Mod-Selector v1.1.0 by Saloran26  -  made with Claude AI"");
+draw_text(_cx, _gh * 0.90, ""Mod-Selector v1.2.0 by Saloran26  -  made with Claude AI"");
 
 draw_set_halign(fa_left);
 draw_set_color(c_white);
@@ -628,7 +628,7 @@ string GUARD_GML = @"if (variable_global_exists(""modmenu_open"") && global.modm
 // left (same left edge x+16, same color/alpha/font/scale already set above it).
 string VERSION_ANCHOR = "draw_text_transformed(x + 16, y + 40, _version_text, _scale, _scale, 0);";
 string VERSION_CREDIT = VERSION_ANCHOR + "\n"
-    + "draw_text_transformed(x + 16, y + 56, \"Mod-Selector v1.1.0 by Saloran26\", _scale, _scale, 0);";
+    + "draw_text_transformed(x + 16, y + 56, \"Mod-Selector v1.2.0 by Saloran26\", _scale, _scale, 0);";
 
 // ----------------------------------------------------------------------------
 //  1) Create obj_modmenu and wire its three events.

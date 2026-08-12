@@ -146,9 +146,26 @@ oder mehrere getrennte Durchläufe parallel führen.
 - Profile sind unabhängig vom Mod: dasselbe Profil funktioniert mit Vanilla und
   jedem Mod desselben Kapitels.
 
-## 🔄 Nach einem Deltarune-Update
-Steam ersetzt die `data.win` durch das Original → **Schritt 2** einmal
-wiederholen. Loader und Mods bleiben erhalten.
+## 🔄 Auto-Update & Selbst-Reparatur (ab v1.2.0)
+Der Loader prüft **bei jedem Start** (vor dem Spiel) zwei Dinge:
+
+1. **Neue Selector-Version?** Gibt es auf GitHub ein neueres Release, erscheint ein
+   Dialog: **Ja** = jetzt aktualisieren · **Nein** = überspringen · **Abbrechen** =
+   ab jetzt immer automatisch. Beim Update lädt der Loader das Release, ersetzt seine
+   eigenen Dateien und baut das Menü neu ein.
+2. **Deltarune-Update erkannt?** Wenn Steam die `data.win` durch eine neue Vanilla
+   ersetzt hat (Menü weg), bietet der Loader an, das Menü **automatisch neu
+   einzupatchen** — kein manuelles UndertaleModTool mehr nötig.
+
+Zum Patchen wird der **UndertaleModTool CLI** einmalig (~62 MB) von den offiziellen
+Releases geladen und dauerhaft in `<DELTARUNE>\_tools\UTMT_CLI\` gecacht.
+
+**Auto-Update ein-/ausschalten:** Über den **Abbrechen**-Knopf im Update-Dialog wird
+es aktiviert. Zum Ändern die Datei `%LOCALAPPDATA%\DELTARUNE\selector_settings.json`
+bearbeiten: `"autoUpdate": true` (still automatisch) bzw. `false` (nachfragen).
+
+Ist Auto-Update aktiv, passiert alles **ohne Nachfrage** still vor dem Spielstart.
+Manuell neu patchen (Notfall) geht weiterhin über den UndertaleModTool wie unten.
 
 ## 🛠️ Fehlerbehebung
 - **Startet über Steam nicht / Fenster blitzt nur auf:** Pfad in den

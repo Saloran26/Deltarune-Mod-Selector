@@ -1,3 +1,7 @@
+# Installed Mod-Selector version. The self-updater compares this against the
+# latest GitHub release tag. Bump it whenever the shipped files change.
+$script:SELECTOR_VERSION = '1.2.0'
+
 function Get-ModLoaderConfig {
     param([Parameter(Mandatory)][string]$GameDir)
     $signal = Join-Path $env:LOCALAPPDATA "DELTARUNE"
@@ -19,6 +23,17 @@ function Get-ModLoaderConfig {
         ProfilesDir     = Join-Path $GameDir "_saveprofiles"      # per-chapter subfolders: ch<N>\<Name>\
         SaveBackupDir   = Join-Path $GameDir "_savebackup"        # user's real saves parked here while a profile is active
         ProfileListPath = Join-Path $signal "profiles.txt"        # written by loader; read by the in-game menu
+        # --- Self-update / auto-repatch support -----------------------------
+        DataWin         = Join-Path $GameDir "data.win"
+        DataWinBackup   = Join-Path $GameDir "data.win.BACKUP"    # clean vanilla the menu was patched from
+        ToolsDir        = Join-Path $GameDir "_tools"
+        UtmtDir         = Join-Path (Join-Path $GameDir "_tools") "UTMT_CLI"   # cached UndertaleModTool CLI
+        InjectorPath    = Join-Path $GameDir "ModLoader\InjectModMenu.csx"     # local copy used to re-patch
+        SettingsPath    = Join-Path $signal "selector_settings.json"          # { autoUpdate, lastCheck }
+        RepoOwner       = "Saloran26"
+        RepoName        = "Deltarune-Mod-Selector"
+        PatchMarker     = "SELECT SAVE PROFILE"                                # present iff data.win is patched
+        UtmtUrl         = "https://github.com/UnderminersTeam/UndertaleModTool/releases/download/0.9.1.2/UTMT_CLI_v0.9.1.2-Windows.zip"
     }
 }
 
@@ -264,6 +279,230 @@ function Set-Ready {
     Set-Content (Join-Path $cfg.SignalDir "mod_ready.txt") "ok" -Encoding utf8
 }
 
+# ============================================================================
+#  Self-update + auto re-patch
+# ============================================================================
+#  On every launch the loader can (a) re-apply the in-game menu if a DELTARUNE
+#  update reverted data.win to vanilla, and (b) update the Mod-Selector itself
+#  from its GitHub releases. Both need UndertaleModTool to re-patch data.win;
+#  it is downloaded once and cached in <GameDir>\_tools\UTMT_CLI. All of this is
+#  strictly best-effort: any failure is swallowed so the game still launches.
+
+function Get-SelectorVersion { return $script:SELECTOR_VERSION }
+
+function Compare-SemVer {
+    param([string]$A, [string]$B)
+    $pa = @(); foreach ($p in (($A -replace '^[vV]', '').Trim() -split '[.\-+]')) { if ($p -match '^\d+$') { $pa += [int]$p } else { break } }
+    $pb = @(); foreach ($p in (($B -replace '^[vV]', '').Trim() -split '[.\-+]')) { if ($p -match '^\d+$') { $pb += [int]$p } else { break } }
+    while ($pa.Count -lt 3) { $pa += 0 }
+    while ($pb.Count -lt 3) { $pb += 0 }
+    for ($i = 0; $i -lt 3; $i++) {
+        if ($pa[$i] -lt $pb[$i]) { return -1 }
+        if ($pa[$i] -gt $pb[$i]) { return 1 }
+    }
+    return 0
+}
+
+function Test-DataWinPatched {
+    param([Parameter(Mandatory)][string]$Path, [string]$Marker = "SELECT SAVE PROFILE")
+    if (-not (Test-Path $Path)) { return $false }
+    try {
+        # Latin1 maps bytes 1:1 to chars, so IndexOf finds the ASCII marker fast.
+        $text = [System.IO.File]::ReadAllText($Path, [System.Text.Encoding]::GetEncoding('ISO-8859-1'))
+        return $text.Contains($Marker)
+    } catch { return $false }
+}
+
+function Get-SelectorSettings {
+    param([Parameter(Mandatory)]$cfg)
+    if (Test-Path $cfg.SettingsPath) {
+        try {
+            $obj = Get-Content -LiteralPath $cfg.SettingsPath -Raw | ConvertFrom-Json
+            if ($null -ne $obj) {
+                if ($obj.PSObject.Properties.Name -notcontains 'autoUpdate') { $obj | Add-Member -NotePropertyName autoUpdate -NotePropertyValue $false }
+                if ($obj.PSObject.Properties.Name -notcontains 'lastCheck')  { $obj | Add-Member -NotePropertyName lastCheck  -NotePropertyValue '' }
+                return $obj
+            }
+        } catch {}
+    }
+    return [pscustomobject]@{ autoUpdate = $false; lastCheck = '' }
+}
+
+function Set-SelectorSettings {
+    param([Parameter(Mandatory)]$cfg, [Parameter(Mandatory)]$Settings)
+    try { $Settings | ConvertTo-Json | Set-Content -LiteralPath $cfg.SettingsPath -Encoding utf8 } catch {}
+}
+
+function Get-LatestSelectorRelease {
+    param([Parameter(Mandatory)]$cfg)
+    try {
+        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+        $url = "https://api.github.com/repos/$($cfg.RepoOwner)/$($cfg.RepoName)/releases/latest"
+        $headers = @{ 'User-Agent' = 'DeltaruneModSelector'; 'Accept' = 'application/vnd.github+json' }
+        $r = Invoke-RestMethod -Uri $url -Headers $headers -TimeoutSec 8 -ErrorAction Stop
+        $zip = $null
+        foreach ($a in $r.assets) { if ($a.name -like '*.zip') { $zip = $a.browser_download_url; break } }
+        return [pscustomobject]@{ Version = ($r.tag_name -replace '^[vV]', ''); Tag = $r.tag_name; ZipUrl = $zip }
+    } catch { return $null }
+}
+
+function Get-UtmtCli {
+    # Returns path to UndertaleModCli.exe, downloading+caching it if -AllowDownload.
+    param([Parameter(Mandatory)]$cfg, [switch]$AllowDownload)
+    if (Test-Path $cfg.UtmtDir) {
+        $found = Get-ChildItem -LiteralPath $cfg.UtmtDir -Recurse -Filter UndertaleModCli.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($found) { return $found.FullName }
+    }
+    if (-not $AllowDownload) { return $null }
+    try {
+        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+        if (-not (Test-Path $cfg.ToolsDir)) { New-Item -ItemType Directory -Path $cfg.ToolsDir -Force | Out-Null }
+        $zip = Join-Path $cfg.ToolsDir "UTMT_CLI.zip"
+        $old = $ProgressPreference; $ProgressPreference = 'SilentlyContinue'
+        Invoke-WebRequest -Uri $cfg.UtmtUrl -OutFile $zip -TimeoutSec 600 -UseBasicParsing
+        $ProgressPreference = $old
+        if (Test-Path $cfg.UtmtDir) { Remove-Item -LiteralPath $cfg.UtmtDir -Recurse -Force }
+        New-Item -ItemType Directory -Path $cfg.UtmtDir -Force | Out-Null
+        Expand-Archive -LiteralPath $zip -DestinationPath $cfg.UtmtDir -Force
+        Remove-Item -LiteralPath $zip -Force -ErrorAction SilentlyContinue
+        $found = Get-ChildItem -LiteralPath $cfg.UtmtDir -Recurse -Filter UndertaleModCli.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($found) { return $found.FullName }
+    } catch {}
+    return $null
+}
+
+function Invoke-DataWinRepatch {
+    # Re-applies the in-game menu to data.win from a clean vanilla using the local
+    # InjectModMenu.csx + cached UTMT. Returns $true on success.
+    param([Parameter(Mandatory)]$cfg)
+    if (-not (Test-Path $cfg.InjectorPath)) { return $false }
+    $cli = Get-UtmtCli $cfg -AllowDownload
+    if (-not $cli) { return $false }
+    if (Test-DataWinPatched $cfg.DataWin $cfg.PatchMarker) {
+        # data.win is already patched -> the clean vanilla is the backup
+        if (-not (Test-Path $cfg.DataWinBackup)) { return $false }
+    } else {
+        # data.win is vanilla (DELTARUNE update reverted it) -> refresh backup from it
+        Copy-Item -LiteralPath $cfg.DataWin -Destination $cfg.DataWinBackup -Force
+    }
+    if (-not (Test-Path $cfg.ToolsDir)) { New-Item -ItemType Directory -Path $cfg.ToolsDir -Force | Out-Null }
+    $out = Join-Path $cfg.ToolsDir "data_patched.win"
+    if (Test-Path $out) { Remove-Item -LiteralPath $out -Force }
+    try { & $cli load $cfg.DataWinBackup -s $cfg.InjectorPath -o $out 2>&1 | Out-Null } catch { return $false }
+    if (-not (Test-Path $out)) { return $false }
+    if (-not (Test-DataWinPatched $out $cfg.PatchMarker)) { Remove-Item -LiteralPath $out -Force -ErrorAction SilentlyContinue; return $false }
+    Copy-Item -LiteralPath $out -Destination $cfg.DataWin -Force
+    Remove-Item -LiteralPath $out -Force -ErrorAction SilentlyContinue
+    return $true
+}
+
+function Invoke-SelectorSelfUpdate {
+    # Downloads the release ZIP, replaces loader + injector, then re-patches.
+    param([Parameter(Mandatory)]$cfg, [Parameter(Mandatory)]$Release)
+    if (-not $Release.ZipUrl) { return $false }
+    if (-not (Test-Path $cfg.ToolsDir)) { New-Item -ItemType Directory -Path $cfg.ToolsDir -Force | Out-Null }
+    $tmp = Join-Path $cfg.ToolsDir ("update_" + [guid]::NewGuid().ToString('N'))
+    New-Item -ItemType Directory -Path $tmp -Force | Out-Null
+    try {
+        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+        $zip = Join-Path $tmp "release.zip"
+        $old = $ProgressPreference; $ProgressPreference = 'SilentlyContinue'
+        Invoke-WebRequest -Uri $Release.ZipUrl -OutFile $zip -TimeoutSec 120 -UseBasicParsing
+        $ProgressPreference = $old
+        Expand-Archive -LiteralPath $zip -DestinationPath $tmp -Force
+        $root = Get-ChildItem -LiteralPath $tmp -Directory | Where-Object { Test-Path (Join-Path $_.FullName 'Loader') } | Select-Object -First 1
+        if (-not $root) { return $false }
+        $r = $root.FullName
+        $mlSrc = Join-Path $r 'Loader\ModLoader\ModLoader.psm1'
+        $psSrc = Join-Path $r 'Loader\modloader.ps1'
+        $csSrc = Join-Path $r 'Patch\InjectModMenu.csx'
+        # Replace loader + injector; leave mods/, _saveprofiles, settings untouched.
+        if (Test-Path $mlSrc) { Copy-Item -LiteralPath $mlSrc -Destination (Join-Path $cfg.GameDir 'ModLoader\ModLoader.psm1') -Force }
+        if (Test-Path $psSrc) { Copy-Item -LiteralPath $psSrc -Destination (Join-Path $cfg.GameDir 'modloader.ps1') -Force }
+        if (Test-Path $csSrc) { Copy-Item -LiteralPath $csSrc -Destination $cfg.InjectorPath -Force }
+        return (Invoke-DataWinRepatch $cfg)
+    } catch { return $false }
+    finally { if (Test-Path $tmp) { Remove-Item -LiteralPath $tmp -Recurse -Force -ErrorAction SilentlyContinue } }
+}
+
+function Show-SelectorDialog {
+    param([string]$Text, [string]$Title = "Deltarune Mod-Selector", [string]$Buttons = "YesNo", [string]$Icon = "Question")
+    try {
+        Add-Type -AssemblyName System.Windows.Forms -ErrorAction Stop
+        return [System.Windows.Forms.MessageBox]::Show($Text, $Title,
+            [System.Windows.Forms.MessageBoxButtons]::$Buttons,
+            [System.Windows.Forms.MessageBoxIcon]::$Icon)
+    } catch { return [System.Windows.Forms.DialogResult]::None }
+}
+
+function Invoke-UpdateCheck {
+    # Orchestrates version-update and post-DELTARUNE-update re-patch. Best-effort.
+    param([Parameter(Mandatory)]$cfg)
+    try {
+        $settings = Get-SelectorSettings $cfg
+        $auto = [bool]$settings.autoUpdate
+        $needRepatch = -not (Test-DataWinPatched $cfg.DataWin $cfg.PatchMarker)
+
+        # Throttle the network check to once every 4h, unless a re-patch is needed.
+        $doCheck = $true
+        if ($settings.lastCheck) {
+            try { if (((Get-Date) - [datetime]$settings.lastCheck) -lt [timespan]::FromHours(4)) { $doCheck = $false } } catch {}
+        }
+        $release = $null
+        if ($doCheck -or $needRepatch) {
+            $release = Get-LatestSelectorRelease $cfg
+            $settings.lastCheck = (Get-Date).ToString('o')
+            Set-SelectorSettings $cfg $settings
+        }
+
+        $newVersion = ($release -and $release.Version -and (Compare-SemVer (Get-SelectorVersion) $release.Version) -lt 0)
+        $utmtMissing = -not (Get-UtmtCli $cfg)
+
+        if ($newVersion) {
+            $go = $auto
+            if (-not $auto) {
+                $msg = "Eine neue Version des Mod-Selectors ist verfuegbar:`n`n" +
+                       "   Installiert:  v$(Get-SelectorVersion)`n" +
+                       "   Verfuegbar:   v$($release.Version)`n`n" +
+                       "[Ja] = jetzt aktualisieren`n" +
+                       "[Nein] = diesmal ueberspringen`n" +
+                       "[Abbrechen] = ab jetzt immer automatisch aktualisieren"
+                $res = Show-SelectorDialog -Text $msg -Buttons "YesNoCancel"
+                if ($res -eq [System.Windows.Forms.DialogResult]::Yes) { $go = $true }
+                elseif ($res -eq [System.Windows.Forms.DialogResult]::Cancel) { $go = $true; $settings.autoUpdate = $true; Set-SelectorSettings $cfg $settings }
+            }
+            if ($go) {
+                if (-not $auto -and $utmtMissing) { Show-SelectorDialog -Text "Erstmalig wird ein Hilfstool (~62 MB) geladen. Das kann eine Minute dauern - bitte warten." -Buttons "OK" -Icon "Information" | Out-Null }
+                $ok = Invoke-SelectorSelfUpdate $cfg $release
+                if (-not $auto) {
+                    if ($ok) { Show-SelectorDialog -Text "Aktualisiert auf v$($release.Version). Viel Spass!" -Buttons "OK" -Icon "Information" | Out-Null }
+                    else     { Show-SelectorDialog -Text "Update fehlgeschlagen - der Selector laeuft mit der bisherigen Version weiter." -Buttons "OK" -Icon "Warning" | Out-Null }
+                }
+                return
+            }
+        }
+
+        # No (accepted) version update -> if DELTARUNE reverted data.win, re-patch.
+        if (-not (Test-DataWinPatched $cfg.DataWin $cfg.PatchMarker)) {
+            $go = $auto
+            if (-not $auto) {
+                $res = Show-SelectorDialog -Text "Deltarune wurde aktualisiert und hat das Mod-Menue entfernt.`n`nMod-Selector-Menue jetzt neu installieren?" -Buttons "YesNo"
+                $go = ($res -eq [System.Windows.Forms.DialogResult]::Yes)
+            }
+            if ($go) {
+                if (-not $auto -and $utmtMissing) { Show-SelectorDialog -Text "Erstmalig wird ein Hilfstool (~62 MB) geladen. Das kann eine Minute dauern - bitte warten." -Buttons "OK" -Icon "Information" | Out-Null }
+                $ok = Invoke-DataWinRepatch $cfg
+                if (-not $auto) {
+                    if ($ok) { Show-SelectorDialog -Text "Mod-Selector-Menue wurde neu installiert." -Buttons "OK" -Icon "Information" | Out-Null }
+                    else     { Show-SelectorDialog -Text "Neu-Installation fehlgeschlagen (UTMT/Netzwerk?)." -Buttons "OK" -Icon "Warning" | Out-Null }
+                }
+            }
+        }
+    } catch {
+        try { Add-Content -LiteralPath (Join-Path $cfg.SignalDir 'loader_error.txt') -Value ("Update-Check: " + $_.Exception.Message) -Encoding utf8 } catch {}
+    }
+}
+
 function Start-ModLoader {
     param(
         [Parameter(Mandatory)][string]$GameDir,
@@ -279,6 +518,10 @@ function Start-ModLoader {
     Write-ModList $cfg (@(Get-InstalledMods $cfg))
     Write-ProfileList $cfg
     if ([string]::IsNullOrWhiteSpace($GameExe)) { return }
+
+    # Before launching: self-update the selector and/or re-apply the menu if a
+    # DELTARUNE update reverted data.win. Best-effort; never blocks the launch.
+    Invoke-UpdateCheck $cfg
 
     $startParams = @{ FilePath = $GameExe; WorkingDirectory = $GameDir; PassThru = $true }
     if ($GameArgs -and $GameArgs.Count -gt 0) { $startParams.ArgumentList = $GameArgs }
@@ -340,4 +583,4 @@ function Start-ModLoader {
     }
 }
 
-Export-ModuleMember -Function Get-ModLoaderConfig, Backup-FileIfNeeded, Get-InstalledMods, Write-ModList, Restore-Vanilla, Apply-Mod, Clear-Signals, Read-Request, Set-Ready, Start-ModLoader, Get-ChapterSaveFiles, Write-ProfileList, Get-ProfileDir, Swap-InProfile, Swap-OutProfile, New-Profile, Remove-Profile, Read-ProfileCmd, Set-ProfileReady
+Export-ModuleMember -Function Get-ModLoaderConfig, Backup-FileIfNeeded, Get-InstalledMods, Write-ModList, Restore-Vanilla, Apply-Mod, Clear-Signals, Read-Request, Set-Ready, Start-ModLoader, Get-ChapterSaveFiles, Write-ProfileList, Get-ProfileDir, Swap-InProfile, Swap-OutProfile, New-Profile, Remove-Profile, Read-ProfileCmd, Set-ProfileReady, Get-SelectorVersion, Compare-SemVer, Test-DataWinPatched, Get-SelectorSettings, Set-SelectorSettings, Get-LatestSelectorRelease, Get-UtmtCli, Invoke-DataWinRepatch, Invoke-SelectorSelfUpdate, Invoke-UpdateCheck
