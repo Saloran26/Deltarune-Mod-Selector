@@ -176,6 +176,6 @@ Remove-Item -LiteralPath $listCsx -Force -ErrorAction SilentlyContinue
 Write-Host ''
 Write-Host "Fertig: $ok Kapitel gebaut, $german davon zusaetzlich mit Deutsch-Patch, $bad Fehler."
 if (-not $germanFound) {
-    Write-Host 'Hinweis: Kein Deutsch-Patch gefunden. Stelle im Einstellungsmenue "Deutsch-Patch (Spiel)" auf AUS, sonst bleibt Kris im Vanilla-Look.' -ForegroundColor Yellow
+    Write-Host 'Hinweis: Kein Deutsch-Patch gefunden - gebaut wurde nur die englische Fassung. Richtest du den Deutsch-Patch spaeter ein, fuehre dieses Skript noch einmal aus.' -ForegroundColor Yellow
 }
 if ($bad -gt 0) { exit 1 }

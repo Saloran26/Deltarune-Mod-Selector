@@ -11,7 +11,7 @@ Speicherplätze für dieses Kapitel). Deine echten Spielstände bleiben dabei
 geschützt – Profil-Fortschritt landet im Profil, deine Standard-Saves werden nach
 dem Spielen automatisch wiederhergestellt.
 
-Neu in **v1.3.0**: ein **Einstellungsmenü** direkt im Spiel (Menüsprache
+Neu seit **v1.3.0**: ein **Einstellungsmenü** direkt im Spiel (Menüsprache
 Deutsch/Englisch, Deutsch-Patch an/aus, Auto-Update an/aus, Credits) – und ein
 gut verstecktes Geheimnis. 👀
 
@@ -293,8 +293,9 @@ Wählst du einen **anderen Mod** (z. B. Kaizo Knight) und der Thesi-Modus ist an
 baut der Loader die Thesi-Sprites beim ersten Start selbst in diesen Mod ein und
 merkt sich das Ergebnis in `_thesicache\`. Das dauert beim ersten Mal etwas.
 
-> ⚠️ **Ohne Deutsch-Patch:** Stelle **Deutsch-Patch (Spiel)** auf **AUS**. Steht
-> es auf AN und es gibt keine deutsche Thesi-Fassung, bleibt Kris im Vanilla-Look.
+> ℹ️ **Deutsch-Patch erst später eingerichtet?** Dann das Skript noch einmal
+> ausführen, damit auch die deutsche Thesi-Fassung gebaut wird. Bis dahin läuft
+> das Kapitel auf Deutsch, aber ohne Thesi-Haare.
 
 > Nach einem **Deltarune-Update** das Skript einfach noch einmal ausführen.
 

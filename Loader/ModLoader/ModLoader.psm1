@@ -1,6 +1,6 @@
 # Installed Mod-Selector version. The self-updater compares this against the
 # latest GitHub release tag. Bump it whenever the shipped files change.
-$script:SELECTOR_VERSION = '1.3.0'
+$script:SELECTOR_VERSION = '1.3.1'
 
 function Get-ModLoaderConfig {
     param([Parameter(Mandatory)][string]$GameDir)
@@ -450,6 +450,15 @@ function Apply-ChapterVariant {
     }
 
     # 2) If 'vanilla' is selected:
+    # The German patch is optional. If there is no German build for this chapter,
+    # behave as if the toggle were off, so the Thesi overlay still applies.
+    $germanChapterWin = Join-Path (Join-Path $cfg.GermanCacheDir $chFolder) "data.win"
+    if ($germanActive -and -not (Test-Path $germanChapterWin)) { $germanActive = $false }
+    # German + Thesi requested but the combined build is missing -> keep the language.
+    if ($germanActive -and $thesiActive) {
+        $germanThesiWin = Join-Path (Join-Path $cfg.ThesiCacheDir "german_ch${Chapter}") "data.win"
+        if (-not (Test-Path $germanThesiWin)) { $thesiActive = $false }
+    }
     # State 1: Both German + Thesi active (fast-path: cached pre-patched combination)
     if ($germanActive -and $thesiActive) {
         $thesiGermanWin = Join-Path (Join-Path $cfg.ThesiCacheDir "german_ch${Chapter}") "data.win"
