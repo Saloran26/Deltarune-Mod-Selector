@@ -9,3 +9,6 @@
 # Falls jemand echte Mods testweise in mods/ ablegt: nur die Anleitung tracken
 mods/*
 !mods/HIER-MODS-REINLEGEN.txt
+
+# Arbeitsordner des Sprite-Importers
+Packager/

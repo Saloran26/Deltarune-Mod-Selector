@@ -1,6 +1,6 @@
 # Installed Mod-Selector version. The self-updater compares this against the
 # latest GitHub release tag. Bump it whenever the shipped files change.
-$script:SELECTOR_VERSION = '1.2.0'
+$script:SELECTOR_VERSION = '1.3.0'
 
 function Get-ModLoaderConfig {
     param([Parameter(Mandatory)][string]$GameDir)
@@ -9,31 +9,44 @@ function Get-ModLoaderConfig {
     $vanilla = Join-Path $GameDir "_vanilla"
     if (-not (Test-Path $vanilla)) { New-Item -ItemType Directory -Path $vanilla -Force | Out-Null }
     [ordered]@{
-        GameDir         = $GameDir
-        ModsDir         = Join-Path $GameDir "mods"
-        VanillaDir      = $vanilla
-        SignalDir       = $signal
-        ManifestPath    = Join-Path $vanilla "applied.json"
+        GameDir          = $GameDir
+        ModsDir          = Join-Path $GameDir "mods"
+        VanillaDir       = $vanilla
+        SignalDir        = $signal
+        ManifestPath     = Join-Path $vanilla "applied.json"
         # --- Save-Profile support -------------------------------------------
         # DELTARUNE reads/writes its saves (filechN_*) directly from SaveDir
         # (== SignalDir == %LOCALAPPDATA%\DELTARUNE). Profiles are named copies
         # of a chapter's save files; the loader swaps them in before launch and
         # persists them back + restores the user's real saves afterwards.
-        SaveDir         = $signal
-        ProfilesDir     = Join-Path $GameDir "_saveprofiles"      # per-chapter subfolders: ch<N>\<Name>\
-        SaveBackupDir   = Join-Path $GameDir "_savebackup"        # user's real saves parked here while a profile is active
-        ProfileListPath = Join-Path $signal "profiles.txt"        # written by loader; read by the in-game menu
+        SaveDir          = $signal
+        ProfilesDir      = Join-Path $GameDir "_saveprofiles"      # per-chapter subfolders: ch<N>\<Name>\
+        SaveBackupDir    = Join-Path $GameDir "_savebackup"        # user's real saves parked here while a profile is active
+        ProfileListPath  = Join-Path $signal "profiles.txt"        # written by loader; read by the in-game menu
+        ThesiUnlockedPath= Join-Path $signal "thesi_unlocked.txt"  # "1"/"0"; unlocked via secret code in menu
+        ThesiOverlayPath = Join-Path $signal "thesi_overlay.txt"   # "1"/"0"; toggled in settings menu
+        ThesiCacheDir    = Join-Path $GameDir "_thesicache"        # cached patched mods for instant loading
+        ThesiSpritesDir  = Join-Path (Join-Path $GameDir "_tools") "ThesiSprites"
+        # --- German Translation Patch support --------------------------------
+        GermanPatchPath  = Join-Path $signal "german_patch.txt"    # "1"/"0"; toggled in settings menu
+        GermanCacheDir   = Join-Path $GameDir "_germancache"       # pre-patched German data for instant loading
+        GermanPatchesDir = Join-Path (Join-Path $GameDir "_tools") "GermanPatches"
+        # --- Mod Menu Language support --------------------------------------
+        MenuLangPath     = Join-Path $signal "menu_lang.txt"       # "en"/"de"; toggled in settings menu
         # --- Self-update / auto-repatch support -----------------------------
-        DataWin         = Join-Path $GameDir "data.win"
-        DataWinBackup   = Join-Path $GameDir "data.win.BACKUP"    # clean vanilla the menu was patched from
-        ToolsDir        = Join-Path $GameDir "_tools"
-        UtmtDir         = Join-Path (Join-Path $GameDir "_tools") "UTMT_CLI"   # cached UndertaleModTool CLI
-        InjectorPath    = Join-Path $GameDir "ModLoader\InjectModMenu.csx"     # local copy used to re-patch
-        SettingsPath    = Join-Path $signal "selector_settings.json"          # { autoUpdate, lastCheck }
-        RepoOwner       = "Saloran26"
-        RepoName        = "Deltarune-Mod-Selector"
-        PatchMarker     = "SELECT SAVE PROFILE"                                # present iff data.win is patched
-        UtmtUrl         = "https://github.com/UnderminersTeam/UndertaleModTool/releases/download/0.9.1.2/UTMT_CLI_v0.9.1.2-Windows.zip"
+        DataWin          = Join-Path $GameDir "data.win"
+        DataWinBackup    = Join-Path $GameDir "data.win.BACKUP"    # clean vanilla the menu was patched from
+        ToolsDir         = Join-Path $GameDir "_tools"
+        UtmtDir          = Join-Path (Join-Path $GameDir "_tools") "UTMT_CLI"   # cached UndertaleModTool CLI
+        InjectorPath     = Join-Path $GameDir "ModLoader\InjectModMenu.csx"     # local copy used to re-patch
+        # Auto-Update state as plain-text flag files so the in-game menu (GML,
+        # which resolves bare filenames to this same folder) can toggle it too.
+        AutoUpdatePath   = Join-Path $signal "autoupdate.txt"   # "1"/"0"; toggled in-menu with [U]
+        LastCheckPath    = Join-Path $signal "lastcheck.txt"    # ISO datetime of last GitHub check
+        RepoOwner        = "Saloran26"
+        RepoName         = "Deltarune-Mod-Selector"
+        PatchMarker      = "SELECT SAVE PROFILE"                                # present iff data.win is patched
+        UtmtUrl          = "https://github.com/UnderminersTeam/UndertaleModTool/releases/download/0.9.1.2/UTMT_CLI_v0.9.1.2-Windows.zip"
     }
 }
 
@@ -205,30 +218,27 @@ function Set-ProfileReady {
 function Restore-Vanilla {
     param([Parameter(Mandatory)]$cfg)
     if (-not (Test-Path $cfg.ManifestPath)) {
-        if (Test-Path $cfg.VanillaDir) {
-            $backups = Get-ChildItem -LiteralPath $cfg.VanillaDir -Recurse -File -ErrorAction SilentlyContinue
-            foreach ($b in $backups) {
-                if ($b.Name -eq 'applied.json') { continue }
-                $rel = $b.FullName.Substring($cfg.VanillaDir.Length).TrimStart('\','/')
-                $target = Join-Path $cfg.GameDir $rel
-                $tdir = Split-Path $target -Parent
-                if (-not (Test-Path $tdir)) { New-Item -ItemType Directory -Path $tdir -Force | Out-Null }
-                Copy-Item -LiteralPath $b.FullName -Destination $target -Force
-            }
-        }
         return
     }
-    $entries = Get-Content $cfg.ManifestPath -Raw | ConvertFrom-Json
-    foreach ($e in $entries) {
-        $target = Join-Path $cfg.GameDir $e.path
-        if ($e.existedInVanilla) {
-            $backup = Join-Path $cfg.VanillaDir $e.path
-            if (Test-Path $backup) { Copy-Item -LiteralPath $backup -Destination $target -Force }
-        } else {
-            if (Test-Path $target) { Remove-Item -LiteralPath $target -Force }
+    try {
+        $entries = Get-Content $cfg.ManifestPath -Raw | ConvertFrom-Json
+        foreach ($e in $entries) {
+            $target = Join-Path $cfg.GameDir $e.path
+            if ($e.existedInVanilla) {
+                $backup = Join-Path $cfg.VanillaDir $e.path
+                if (Test-Path $backup) {
+                    try { Copy-Item -LiteralPath $backup -Destination $target -Force -ErrorAction SilentlyContinue } catch {}
+                }
+            } else {
+                if (Test-Path $target) {
+                    try { Remove-Item -LiteralPath $target -Force -ErrorAction SilentlyContinue } catch {}
+                }
+            }
         }
+    } catch {}
+    finally {
+        try { Remove-Item $cfg.ManifestPath -Force -ErrorAction SilentlyContinue } catch {}
     }
-    Remove-Item $cfg.ManifestPath -Force
 }
 
 function Apply-Mod {
@@ -279,6 +289,246 @@ function Set-Ready {
     Set-Content (Join-Path $cfg.SignalDir "mod_ready.txt") "ok" -Encoding utf8
 }
 
+function Get-ThesiUnlockedSetting {
+    param([Parameter(Mandatory)]$cfg)
+    if (-not (Test-Path $cfg.ThesiUnlockedPath)) { return $false }
+    try {
+        return ((Get-Content -LiteralPath $cfg.ThesiUnlockedPath -Raw).Trim() -eq '1')
+    } catch { return $false }
+}
+
+function Get-ThesiOverlaySetting {
+    param([Parameter(Mandatory)]$cfg)
+    if (-not (Get-ThesiUnlockedSetting $cfg)) { return $false }
+    if (-not (Test-Path $cfg.ThesiOverlayPath)) { return $false }
+    try {
+        return ((Get-Content -LiteralPath $cfg.ThesiOverlayPath -Raw).Trim() -eq '1')
+    } catch { return $false }
+}
+
+function Set-ThesiOverlaySetting {
+    param([Parameter(Mandatory)]$cfg, [bool]$Enabled)
+    $utf8 = New-Object System.Text.UTF8Encoding($false)
+    try { [System.IO.File]::WriteAllText($cfg.ThesiOverlayPath, ($(if ($Enabled) { '1' } else { '0' })), $utf8) } catch {}
+}
+
+function Apply-ThesiOverlay {
+    param(
+        [Parameter(Mandatory)]$cfg,
+        [Parameter(Mandatory)][int]$Chapter,
+        $Mod = $null
+    )
+    if (-not (Get-ThesiOverlaySetting $cfg)) { return }
+    if ($Chapter -le 0) { return }
+
+    # If the chosen mod is already Thesi Kris, it already has the textures!
+    if ($Mod -and $Mod.Name -like "*Thesi Kris*") { return }
+
+    $chFolder = "chapter${Chapter}_windows"
+    $liveWin = Join-Path (Join-Path $cfg.GameDir $chFolder) "data.win"
+    if (-not (Test-Path $liveWin)) { return }
+
+    if (-not (Test-Path $cfg.ThesiCacheDir)) { New-Item -ItemType Directory -Path $cfg.ThesiCacheDir -Force | Out-Null }
+    $modKey = if ($Mod) { $Mod.Name -replace '[^a-zA-Z0-9_-]', '_' } else { "vanilla" }
+    $cacheDir = Join-Path $cfg.ThesiCacheDir "${modKey}_ch${Chapter}"
+    $cachedWin = Join-Path $cacheDir "data.win"
+
+    # 1) If cached version exists and is valid, copy instantly:
+    if (Test-Path $cachedWin) {
+        $sourceWin = if ($Mod) { Join-Path (Join-Path $Mod.Path $chFolder) "data.win" } else { Join-Path (Join-Path $cfg.VanillaDir $chFolder) "data.win" }
+        $cacheValid = $true
+        if ($sourceWin -and (Test-Path $sourceWin)) {
+            if ((Get-Item $sourceWin).LastWriteTimeUtc -gt (Get-Item $cachedWin).LastWriteTimeUtc) {
+                $cacheValid = $false
+            }
+        }
+        if ($cacheValid) {
+            Copy-Item -LiteralPath $cachedWin -Destination $liveWin -Force
+            return
+        }
+    }
+
+    # 2) If not cached, patch liveWin with Thesi sprites and cache it:
+    $cli = Get-UtmtCli $cfg -AllowDownload
+    $importer = Join-Path $cfg.ToolsDir "ImportGraphicsCli.csx"
+    $chSprites = Join-Path $cfg.ThesiSpritesDir "ch${Chapter}"
+    $spritesDir = if (Test-Path $chSprites) { $chSprites } else { Join-Path $cfg.ThesiSpritesDir "Sprites" }
+    if (-not $cli -or -not (Test-Path $importer) -or -not (Test-Path $spritesDir)) { return }
+
+    if (-not (Test-Path $cacheDir)) { New-Item -ItemType Directory -Path $cacheDir -Force | Out-Null }
+    $tmpWin = Join-Path $cacheDir "patch_temp.win"
+    if (Test-Path $tmpWin) { Remove-Item -LiteralPath $tmpWin -Force }
+
+    $oldEnv = $env:IMPORT_FOLDER
+    $env:IMPORT_FOLDER = $spritesDir
+    try {
+        cmd /c "echo. | `"$cli`" load `"$liveWin`" -s `"$importer`" -o `"$tmpWin`"" | Out-Null
+    } catch {}
+    finally {
+        $env:IMPORT_FOLDER = $oldEnv
+    }
+
+    if (Test-Path $tmpWin) {
+        Move-Item -LiteralPath $tmpWin -Destination $cachedWin -Force
+        Copy-Item -LiteralPath $cachedWin -Destination $liveWin -Force
+    }
+}
+
+function Get-GermanPatchSetting {
+    param([Parameter(Mandatory)]$cfg)
+    if (-not (Test-Path $cfg.GermanPatchPath)) { return $true }
+    try {
+        return ((Get-Content -LiteralPath $cfg.GermanPatchPath -Raw).Trim() -eq '1')
+    } catch { return $true }
+}
+
+function Set-GermanPatchSetting {
+    param([Parameter(Mandatory)]$cfg, [bool]$Enabled)
+    $utf8 = New-Object System.Text.UTF8Encoding($false)
+    try { [System.IO.File]::WriteAllText($cfg.GermanPatchPath, ($(if ($Enabled) { '1' } else { '0' })), $utf8) } catch {}
+}
+
+function Get-MenuLangSetting {
+    param([Parameter(Mandatory)]$cfg)
+    if (-not (Test-Path $cfg.MenuLangPath)) { return "en" }
+    try {
+        $val = (Get-Content -LiteralPath $cfg.MenuLangPath -Raw).Trim().ToLower()
+        if ($val -eq 'de') { return 'de' }
+        return 'en'
+    } catch { return "en" }
+}
+
+function Set-MenuLangSetting {
+    param([Parameter(Mandatory)]$cfg, [string]$Lang = "en")
+    $utf8 = New-Object System.Text.UTF8Encoding($false)
+    try { [System.IO.File]::WriteAllText($cfg.MenuLangPath, $Lang.ToLower(), $utf8) } catch {}
+}
+
+function Apply-ChapterVariant {
+    param(
+        [Parameter(Mandatory)]$cfg,
+        [Parameter(Mandatory)][int]$Chapter,
+        [string]$ModName = 'vanilla'
+    )
+    Restore-Vanilla $cfg
+    if ($Chapter -le 0) { return }
+
+    $thesiActive = Get-ThesiOverlaySetting $cfg
+    $germanActive = Get-GermanPatchSetting $cfg
+
+    $chFolder = "chapter${Chapter}_windows"
+    $liveDir = Join-Path $cfg.GameDir $chFolder
+    if (-not (Test-Path $liveDir)) { return }
+
+    # 1) If a custom mod is selected (not 'vanilla')
+    if ($ModName -ne 'vanilla') {
+        $mod = @(Get-InstalledMods $cfg) | Where-Object { $_.Name -eq $ModName -and $_.Chapter -eq $Chapter } | Select-Object -First 1
+        if ($mod) {
+            Apply-Mod $cfg $mod
+            $modKey = $mod.Name -replace '[^a-zA-Z0-9_-]', '_'
+            $targetWin = Join-Path (Join-Path $cfg.GameDir $chFolder) "data.win"
+
+            if ($germanActive -and $thesiActive) {
+                $cachedGermanThesiWin = Join-Path (Join-Path $cfg.ThesiCacheDir "${modKey}_german_ch${Chapter}") "data.win"
+                if (Test-Path $cachedGermanThesiWin) {
+                    Copy-Item -LiteralPath $cachedGermanThesiWin -Destination $targetWin -Force
+                } else {
+                    Apply-ThesiOverlay $cfg $Chapter $mod
+                }
+            }
+            elseif ($germanActive -and -not $thesiActive) {
+                $cachedGermanWin = Join-Path (Join-Path $cfg.GermanCacheDir "${modKey}_ch${Chapter}") "data.win"
+                if (Test-Path $cachedGermanWin) {
+                    Copy-Item -LiteralPath $cachedGermanWin -Destination $targetWin -Force
+                }
+            }
+            elseif (-not $germanActive -and $thesiActive) {
+                Apply-ThesiOverlay $cfg $Chapter $mod
+            }
+        }
+        return
+    }
+
+    # 2) If 'vanilla' is selected:
+    # State 1: Both German + Thesi active (fast-path: cached pre-patched combination)
+    if ($germanActive -and $thesiActive) {
+        $thesiGermanWin = Join-Path (Join-Path $cfg.ThesiCacheDir "german_ch${Chapter}") "data.win"
+        $filesToApply = @()
+        if (Test-Path $thesiGermanWin) {
+            $filesToApply += [pscustomobject]@{ RelPath = "$chFolder\data.win"; Src = $thesiGermanWin }
+        }
+        if ($Chapter -eq 1) {
+            $gLang = Join-Path (Join-Path (Join-Path $cfg.GermanCacheDir "chapter1_windows") "lang") "lang_en.json"
+            if (Test-Path $gLang) {
+                $filesToApply += [pscustomobject]@{ RelPath = "chapter1_windows\lang\lang_en.json"; Src = $gLang }
+            }
+        }
+        if ($Chapter -eq 5) {
+            $gVid = Join-Path (Join-Path (Join-Path $cfg.GermanCacheDir "chapter5_windows") "vid") "ch5_intro_en.mp4"
+            if (Test-Path $gVid) {
+                $filesToApply += [pscustomobject]@{ RelPath = "chapter5_windows\vid\ch5_intro_en.mp4"; Src = $gVid }
+            }
+        }
+        $manifest = @()
+        foreach ($f in $filesToApply) {
+            $existed = Backup-FileIfNeeded $cfg $f.RelPath
+            $manifest += [pscustomobject]@{ path = $f.RelPath; existedInVanilla = $existed }
+            $dst = Join-Path $cfg.GameDir $f.RelPath
+            $dstDir = Split-Path $dst -Parent
+            if (-not (Test-Path $dstDir)) { New-Item -ItemType Directory -Path $dstDir -Force | Out-Null }
+            Copy-Item -LiteralPath $f.Src -Destination $dst -Force
+        }
+        $manifest | ConvertTo-Json -Depth 5 | Set-Content -Path $cfg.ManifestPath -Encoding utf8
+        return
+    }
+
+    # State 2: German active, Thesi disabled (fast-path: pure German translation)
+    if ($germanActive -and -not $thesiActive) {
+        $germanWin = Join-Path (Join-Path $cfg.GermanCacheDir $chFolder) "data.win"
+        $filesToApply = @()
+        if (Test-Path $germanWin) {
+            $filesToApply += [pscustomobject]@{ RelPath = "$chFolder\data.win"; Src = $germanWin }
+        }
+        if ($Chapter -eq 1) {
+            $gLang = Join-Path (Join-Path (Join-Path $cfg.GermanCacheDir "chapter1_windows") "lang") "lang_en.json"
+            if (Test-Path $gLang) {
+                $filesToApply += [pscustomobject]@{ RelPath = "chapter1_windows\lang\lang_en.json"; Src = $gLang }
+            }
+        }
+        if ($Chapter -eq 5) {
+            $gVid = Join-Path (Join-Path (Join-Path $cfg.GermanCacheDir "chapter5_windows") "vid") "ch5_intro_en.mp4"
+            if (Test-Path $gVid) {
+                $filesToApply += [pscustomobject]@{ RelPath = "chapter5_windows\vid\ch5_intro_en.mp4"; Src = $gVid }
+            }
+        }
+        $manifest = @()
+        foreach ($f in $filesToApply) {
+            $existed = Backup-FileIfNeeded $cfg $f.RelPath
+            $manifest += [pscustomobject]@{ path = $f.RelPath; existedInVanilla = $existed }
+            $dst = Join-Path $cfg.GameDir $f.RelPath
+            $dstDir = Split-Path $dst -Parent
+            if (-not (Test-Path $dstDir)) { New-Item -ItemType Directory -Path $dstDir -Force | Out-Null }
+            Copy-Item -LiteralPath $f.Src -Destination $dst -Force
+        }
+        $manifest | ConvertTo-Json -Depth 5 | Set-Content -Path $cfg.ManifestPath -Encoding utf8
+        return
+    }
+
+    # State 3: German disabled, Thesi active (fast-path: English Thesi Kris mod)
+    if (-not $germanActive -and $thesiActive) {
+        $thesiMod = @(Get-InstalledMods $cfg) | Where-Object { $_.Name -like "*Thesi Kris*" -and $_.Chapter -eq $Chapter } | Select-Object -First 1
+        if ($thesiMod) {
+            Apply-Mod $cfg $thesiMod
+        } else {
+            Restore-Vanilla $cfg
+        }
+        return
+    }
+
+    # State 4: Both disabled -> pure English vanilla
+    Restore-Vanilla $cfg
+}
+
 # ============================================================================
 #  Self-update + auto re-patch
 # ============================================================================
@@ -315,22 +565,22 @@ function Test-DataWinPatched {
 
 function Get-SelectorSettings {
     param([Parameter(Mandatory)]$cfg)
-    if (Test-Path $cfg.SettingsPath) {
-        try {
-            $obj = Get-Content -LiteralPath $cfg.SettingsPath -Raw | ConvertFrom-Json
-            if ($null -ne $obj) {
-                if ($obj.PSObject.Properties.Name -notcontains 'autoUpdate') { $obj | Add-Member -NotePropertyName autoUpdate -NotePropertyValue $false }
-                if ($obj.PSObject.Properties.Name -notcontains 'lastCheck')  { $obj | Add-Member -NotePropertyName lastCheck  -NotePropertyValue '' }
-                return $obj
-            }
-        } catch {}
+    $auto = $false
+    if (Test-Path $cfg.AutoUpdatePath) {
+        try { $auto = ((Get-Content -LiteralPath $cfg.AutoUpdatePath -Raw).Trim() -eq '1') } catch {}
     }
-    return [pscustomobject]@{ autoUpdate = $false; lastCheck = '' }
+    $last = ''
+    if (Test-Path $cfg.LastCheckPath) {
+        try { $last = (Get-Content -LiteralPath $cfg.LastCheckPath -Raw).Trim() } catch {}
+    }
+    return [pscustomobject]@{ autoUpdate = $auto; lastCheck = $last }
 }
 
 function Set-SelectorSettings {
     param([Parameter(Mandatory)]$cfg, [Parameter(Mandatory)]$Settings)
-    try { $Settings | ConvertTo-Json | Set-Content -LiteralPath $cfg.SettingsPath -Encoding utf8 } catch {}
+    $utf8 = New-Object System.Text.UTF8Encoding($false)
+    try { [System.IO.File]::WriteAllText($cfg.AutoUpdatePath, ($(if ($Settings.autoUpdate) { '1' } else { '0' })), $utf8) } catch {}
+    try { [System.IO.File]::WriteAllText($cfg.LastCheckPath, [string]$Settings.lastCheck, $utf8) } catch {}
 }
 
 function Get-LatestSelectorRelease {
@@ -541,12 +791,7 @@ function Start-ModLoader {
                 # A new request means the previous chapter is done -> persist its
                 # profile (if any) and restore the real saves before we re-swap.
                 Swap-OutProfile $cfg
-                if ($req.Name -eq 'vanilla') {
-                    Restore-Vanilla $cfg
-                } else {
-                    $mod = @(Get-InstalledMods $cfg) | Where-Object { $_.Name -eq $req.Name -and $_.Chapter -eq $req.Chapter } | Select-Object -First 1
-                    if ($mod) { Apply-Mod $cfg $mod } else { Restore-Vanilla $cfg }
-                }
+                Apply-ChapterVariant $cfg $req.Chapter $req.Name
                 # Empty profile == "Standard-Saves" -> play on the real saves, no swap.
                 if ($req.Chapter -gt 0 -and -not [string]::IsNullOrWhiteSpace($req.Profile)) {
                     Swap-InProfile $cfg $req.Chapter $req.Profile
@@ -583,4 +828,4 @@ function Start-ModLoader {
     }
 }
 
-Export-ModuleMember -Function Get-ModLoaderConfig, Backup-FileIfNeeded, Get-InstalledMods, Write-ModList, Restore-Vanilla, Apply-Mod, Clear-Signals, Read-Request, Set-Ready, Start-ModLoader, Get-ChapterSaveFiles, Write-ProfileList, Get-ProfileDir, Swap-InProfile, Swap-OutProfile, New-Profile, Remove-Profile, Read-ProfileCmd, Set-ProfileReady, Get-SelectorVersion, Compare-SemVer, Test-DataWinPatched, Get-SelectorSettings, Set-SelectorSettings, Get-LatestSelectorRelease, Get-UtmtCli, Invoke-DataWinRepatch, Invoke-SelectorSelfUpdate, Invoke-UpdateCheck
+Export-ModuleMember -Function Get-ModLoaderConfig, Backup-FileIfNeeded, Get-InstalledMods, Write-ModList, Restore-Vanilla, Apply-Mod, Clear-Signals, Read-Request, Set-Ready, Start-ModLoader, Get-ChapterSaveFiles, Write-ProfileList, Get-ProfileDir, Swap-InProfile, Swap-OutProfile, New-Profile, Remove-Profile, Read-ProfileCmd, Set-ProfileReady, Get-SelectorVersion, Compare-SemVer, Test-DataWinPatched, Get-SelectorSettings, Set-SelectorSettings, Get-LatestSelectorRelease, Get-UtmtCli, Invoke-DataWinRepatch, Invoke-SelectorSelfUpdate, Invoke-UpdateCheck, Get-ThesiOverlaySetting, Set-ThesiOverlaySetting, Apply-ThesiOverlay, Get-GermanPatchSetting, Set-GermanPatchSetting, Get-MenuLangSetting, Set-MenuLangSetting, Apply-ChapterVariant

@@ -97,6 +97,132 @@ mm_target  = """";
 mm_wait    = """";
 mm_holdt   = 0;
 
+mm_autoupdate = false;
+if (file_exists(""autoupdate.txt""))
+{
+    var _af = file_text_open_read(""autoupdate.txt"");
+    var _av = file_text_read_string(_af);
+    file_text_close(_af);
+    if (string_length(_av) > 0 && string_char_at(_av, 1) == ""1"")
+        mm_autoupdate = true;
+}
+
+mm_secret_str = """";
+mm_anim_timer = 0;
+mm_thesi_unlocked = false;
+if (file_exists(""thesi_unlocked.txt""))
+{
+    var _tuf = file_text_open_read(""thesi_unlocked.txt"");
+    var _tuv = file_text_read_string(_tuf);
+    file_text_close(_tuf);
+    mm_thesi_unlocked = (string_length(_tuv) > 0 && string_char_at(_tuv, 1) == ""1"");
+}
+
+mm_thesi_overlay = false;
+if (mm_thesi_unlocked)
+{
+    if (file_exists(""thesi_overlay.txt""))
+    {
+        var _tof = file_text_open_read(""thesi_overlay.txt"");
+        var _tov = file_text_read_string(_tof);
+        file_text_close(_tof);
+        mm_thesi_overlay = (string_length(_tov) > 0 && string_char_at(_tov, 1) == ""1"");
+    }
+    else
+    {
+        var _tof2 = file_text_open_write(""thesi_overlay.txt"");
+        file_text_write_string(_tof2, ""1"");
+        file_text_close(_tof2);
+        mm_thesi_overlay = true;
+    }
+}
+else
+{
+    var _tof3 = file_text_open_write(""thesi_overlay.txt"");
+    file_text_write_string(_tof3, ""0"");
+    file_text_close(_tof3);
+}
+
+mm_german_patch = true;
+if (file_exists(""german_patch.txt""))
+{
+    var _gpf = file_text_open_read(""german_patch.txt"");
+    var _gpv = file_text_read_string(_gpf);
+    file_text_close(_gpf);
+    mm_german_patch = (string_length(_gpv) > 0 && string_char_at(_gpv, 1) == ""1"");
+}
+else
+{
+    var _gpf2 = file_text_open_write(""german_patch.txt"");
+    file_text_write_string(_gpf2, ""1"");
+    file_text_close(_gpf2);
+}
+
+mm_menu_lang = ""en"";
+if (file_exists(""menu_lang.txt""))
+{
+    var _mlf = file_text_open_read(""menu_lang.txt"");
+    var _mlv = file_text_read_string(_mlf);
+    file_text_close(_mlf);
+    if (string_pos(""de"", string_lower(_mlv)) > 0)
+        mm_menu_lang = ""de"";
+    else
+        mm_menu_lang = ""en"";
+}
+else
+{
+    var _mlf2 = file_text_open_write(""menu_lang.txt"");
+    file_text_write_string(_mlf2, ""en"");
+    file_text_close(_mlf2);
+}
+mm_sidx = 0;
+
+mm_draw_soul = function(_hx, _hy)
+{
+    if (mm_thesi_overlay)
+    {
+        var _t_col = make_color_rgb(117, 250, 209);
+        var _p_col = make_color_rgb(235, 0, 109);
+        var _x0s = [1, 0, 0, 0, 0, 1, 2, 3, 4];
+        var _x1s = [2, 3, 4, 4, 4, 4, 4, 4, 4];
+        for (var _r = 0; _r < 9; _r++)
+        {
+            var _rx0 = _x0s[_r];
+            var _rx1 = _x1s[_r];
+            draw_set_color(_t_col);
+            draw_rectangle(_hx + _rx0, _hy + _r, _hx + _rx1, _hy + _r, false);
+            draw_set_color(_p_col);
+            draw_rectangle(_hx + 9 - _rx1, _hy + _r, _hx + 9 - _rx0, _hy + _r, false);
+        }
+        draw_set_color(c_yellow);
+    }
+    else
+    {
+        draw_sprite_ext(spr_heart, 0, _hx, _hy, 1, 1, 0, c_white, 1);
+        draw_set_color(c_yellow);
+    }
+};
+
+mm_ps = false;
+if (instance_exists(obj_gamecontroller))
+{
+    var _gpd2 = obj_gamecontroller.gamepad_id;
+    if (gamepad_is_connected(_gpd2))
+    {
+        var _desc = string_lower(gamepad_get_description(_gpd2));
+        if (string_pos(""playstation"", _desc) > 0 || string_pos(""sony"", _desc) > 0
+            || string_pos(""dualshock"", _desc) > 0 || string_pos(""dualsense"", _desc) > 0
+            || string_pos(""ps3"", _desc) > 0 || string_pos(""ps4"", _desc) > 0 || string_pos(""ps5"", _desc) > 0
+            || string_pos(""wireless controller"", _desc) > 0)
+            mm_ps = true;
+    }
+}
+mm_b_confirm  = mm_ps ? ""Cross""    : ""A"";
+mm_b_back     = mm_ps ? ""Circle""   : ""B"";
+mm_b_delete   = mm_ps ? ""Triangle"" : ""Y"";
+mm_b_toggle   = mm_ps ? ""Square""   : ""X"";
+mm_b_settings = mm_ps ? ""Select""   : ""Back"";
+
 mm_names = [""Vanilla""];
 
 if (file_exists(""modlist.txt""))
@@ -112,7 +238,11 @@ if (file_exists(""modlist.txt""))
             var _n  = real(string_copy(_line, 1, _sep - 1));
             var _nm = string_copy(_line, _sep + 1, string_length(_line) - _sep);
             if (_n == mm_chapter)
-                array_push(mm_names, _nm);
+            {
+                var _is_thesi = (string_pos(""thesi"", string_lower(_nm)) > 0);
+                if (!_is_thesi || mm_thesi_unlocked)
+                    array_push(mm_names, _nm);
+            }
         }
     }
     file_text_close(_f);
@@ -156,6 +286,122 @@ if (!_cancel)
     }
 }
 
+// --- Secret Easter Egg Code: 'thesi' (or Triangle/Y x5 on controller) ---
+if (!mm_thesi_unlocked && mm_state != ""naming"" && mm_state != ""thesi_anim"")
+{
+    var _hit_letter = """";
+    if (keyboard_check_pressed(ord(""T""))) _hit_letter = ""t"";
+    else if (keyboard_check_pressed(ord(""H""))) _hit_letter = ""h"";
+    else if (keyboard_check_pressed(ord(""E""))) _hit_letter = ""e"";
+    else if (keyboard_check_pressed(ord(""S""))) _hit_letter = ""s"";
+    else if (keyboard_check_pressed(ord(""I""))) _hit_letter = ""i"";
+
+    var _controller_hit = false;
+    if (instance_exists(obj_gamecontroller))
+    {
+        var _gp_sec = obj_gamecontroller.gamepad_id;
+        if (gamepad_button_check_pressed(_gp_sec, gp_face4))
+            _controller_hit = true;
+    }
+
+    if (_hit_letter != """" || _controller_hit)
+    {
+        var _target_seq = ""thesi"";
+        var _matched = false;
+        if (_controller_hit)
+        {
+            mm_secret_str += ""c"";
+            _matched = true;
+            if (string_length(mm_secret_str) >= 5)
+                _hit_letter = ""WIN"";
+        }
+        else
+        {
+            var _expected_char = string_char_at(_target_seq, string_length(mm_secret_str) + 1);
+            if (_hit_letter == _expected_char)
+            {
+                mm_secret_str += _hit_letter;
+                _matched = true;
+                if (mm_secret_str == ""thesi"")
+                    _hit_letter = ""WIN"";
+            }
+            else if (_hit_letter == ""t"")
+            {
+                mm_secret_str = ""t"";
+                _matched = true;
+            }
+            else
+            {
+                mm_secret_str = """";
+            }
+        }
+
+        if (_matched && _hit_letter != ""WIN"")
+        {
+            var _pitch = 0.9 + (string_length(mm_secret_str) * 0.15);
+            audio_play_sound(snd_menumove, 60, false, 0.8, 0, _pitch);
+        }
+
+        if (_hit_letter == ""WIN"")
+        {
+            mm_secret_str = """";
+            mm_thesi_unlocked = true;
+            mm_thesi_overlay = true;
+            var _tuf = file_text_open_write(""thesi_unlocked.txt"");
+            file_text_write_string(_tuf, ""1"");
+            file_text_close(_tuf);
+
+            var _tof = file_text_open_write(""thesi_overlay.txt"");
+            file_text_write_string(_tof, ""1"");
+            file_text_close(_tof);
+
+            mm_names = [""Vanilla""];
+            if (file_exists(""modlist.txt""))
+            {
+                var _rf = file_text_open_read(""modlist.txt"");
+                while (!file_text_eof(_rf))
+                {
+                    var _rl = file_text_read_string(_rf);
+                    file_text_readln(_rf);
+                    var _rsep = string_pos(""|"", _rl);
+                    if (_rsep > 0)
+                    {
+                        var _rn  = real(string_copy(_rl, 1, _rsep - 1));
+                        var _rnm = string_copy(_rl, _rsep + 1, string_length(_rl) - _rsep);
+                        if (_rn == mm_chapter)
+                            array_push(mm_names, _rnm);
+                    }
+                }
+                file_text_close(_rf);
+            }
+
+            audio_play_sound(ch5_select, 100, false);
+            audio_play_sound(snd_select, 100, false);
+            mm_state = ""thesi_anim"";
+            mm_anim_timer = 0;
+        }
+    }
+}
+
+if (mm_state == ""thesi_anim"")
+{
+    mm_anim_timer += 1;
+    var _cont = button1_p() || keyboard_check_pressed(vk_space) || keyboard_check_pressed(vk_enter);
+    if (!_cont && instance_exists(obj_gamecontroller))
+    {
+        var _gpc = obj_gamecontroller.gamepad_id;
+        if (gamepad_button_check_pressed(_gpc, gp_face1))
+            _cont = true;
+    }
+    if ((_cont && mm_anim_timer > 30) || mm_anim_timer > 360)
+    {
+        audio_play_sound(snd_select, 50, 0);
+        mm_state = ""settings"";
+        mm_sidx = 0;
+    }
+    exit;
+}
+
 if (mm_state == ""select"")
 {
     if (up_p())
@@ -167,6 +413,36 @@ if (mm_state == ""select"")
     {
         mm_index = (mm_index + 1) mod array_length(mm_names);
         audio_play_sound(snd_menumove, 50, 0);
+    }
+
+    var _toggle = keyboard_check_pressed(ord(""U""));
+    if (!_toggle && instance_exists(obj_gamecontroller))
+    {
+        var _gpt = obj_gamecontroller.gamepad_id;
+        if (gamepad_button_check_pressed(_gpt, gp_face3))
+            _toggle = true;
+    }
+    if (_toggle)
+    {
+        mm_autoupdate = !mm_autoupdate;
+        audio_play_sound(snd_select, 50, 0);
+        var _uf = file_text_open_write(""autoupdate.txt"");
+        file_text_write_string(_uf, mm_autoupdate ? ""1"" : ""0"");
+        file_text_close(_uf);
+    }
+
+    var _open_settings = (keyboard_check_pressed(ord(""S"")) && mm_secret_str != ""the"") || keyboard_check_pressed(vk_tab);
+    if (!_open_settings && instance_exists(obj_gamecontroller))
+    {
+        var _gps = obj_gamecontroller.gamepad_id;
+        if (gamepad_button_check_pressed(_gps, gp_select) || gamepad_button_check_pressed(_gps, gp_shoulderl))
+            _open_settings = true;
+    }
+    if (_open_settings)
+    {
+        audio_play_sound(snd_select, 50, 0);
+        mm_sidx = 0;
+        mm_state = ""settings"";
     }
 
     if (button1_p())
@@ -187,6 +463,173 @@ if (mm_state == ""select"")
         global.modmenu_open = false;
         instance_destroy();
         room_restart();
+    }
+}
+else if (mm_state == ""settings"")
+{
+    var _s_count = mm_thesi_unlocked ? 7 : 5;
+    if (up_p())
+    {
+        mm_sidx = ((mm_sidx - 1) + _s_count) mod _s_count;
+        audio_play_sound(snd_menumove, 50, 0);
+    }
+    if (down_p())
+    {
+        mm_sidx = (mm_sidx + 1) mod _s_count;
+        audio_play_sound(snd_menumove, 50, 0);
+    }
+
+    var _s_action = button1_p() || keyboard_check_pressed(vk_space) || keyboard_check_pressed(vk_enter);
+    var _s_lr     = left_p() || right_p();
+
+    if (_s_action || _s_lr)
+    {
+        if (mm_thesi_unlocked)
+        {
+            if (mm_sidx == 0)
+            {
+                mm_thesi_overlay = !mm_thesi_overlay;
+                audio_play_sound(snd_select, 50, 0);
+                var _tof = file_text_open_write(""thesi_overlay.txt"");
+                file_text_write_string(_tof, mm_thesi_overlay ? ""1"" : ""0"");
+                file_text_close(_tof);
+            }
+            else if (mm_sidx == 1)
+            {
+                mm_german_patch = !mm_german_patch;
+                audio_play_sound(snd_select, 50, 0);
+                var _gpf = file_text_open_write(""german_patch.txt"");
+                file_text_write_string(_gpf, mm_german_patch ? ""1"" : ""0"");
+                file_text_close(_gpf);
+            }
+            else if (mm_sidx == 2)
+            {
+                if (mm_menu_lang == ""en"")
+                    mm_menu_lang = ""de"";
+                else
+                    mm_menu_lang = ""en"";
+                audio_play_sound(snd_select, 50, 0);
+                var _mlf = file_text_open_write(""menu_lang.txt"");
+                file_text_write_string(_mlf, mm_menu_lang);
+                file_text_close(_mlf);
+            }
+            else if (mm_sidx == 3)
+            {
+                mm_autoupdate = !mm_autoupdate;
+                audio_play_sound(snd_select, 50, 0);
+                var _uf = file_text_open_write(""autoupdate.txt"");
+                file_text_write_string(_uf, mm_autoupdate ? ""1"" : ""0"");
+                file_text_close(_uf);
+            }
+            else if (mm_sidx == 4)
+            {
+                if (_s_action)
+                {
+                    audio_play_sound(snd_swing, 50, 0);
+                    mm_thesi_unlocked = false;
+                    mm_thesi_overlay = false;
+                    if (file_exists(""thesi_unlocked.txt""))
+                        file_delete(""thesi_unlocked.txt"");
+                    var _tof_l = file_text_open_write(""thesi_overlay.txt"");
+                    file_text_write_string(_tof_l, ""0"");
+                    file_text_close(_tof_l);
+
+                    mm_names = [""Vanilla""];
+                    if (file_exists(""modlist.txt""))
+                    {
+                        var _rf_l = file_text_open_read(""modlist.txt"");
+                        while (!file_text_eof(_rf_l))
+                        {
+                            var _rl_l = file_text_read_string(_rf_l);
+                            file_text_readln(_rf_l);
+                            var _rsep_l = string_pos(""|"", _rl_l);
+                            if (_rsep_l > 0)
+                            {
+                                var _rn_l  = real(string_copy(_rl_l, 1, _rsep_l - 1));
+                                var _rnm_l = string_copy(_rl_l, _rsep_l + 1, string_length(_rl_l) - _rsep_l);
+                                if (_rn_l == mm_chapter)
+                                {
+                                    var _is_th = (string_pos(""thesi"", string_lower(_rnm_l)) > 0);
+                                    if (!_is_th)
+                                        array_push(mm_names, _rnm_l);
+                                }
+                            }
+                        }
+                        file_text_close(_rf_l);
+                    }
+                    mm_sidx = 0;
+                }
+            }
+            else if (mm_sidx == 5)
+            {
+                if (_s_action)
+                {
+                    audio_play_sound(snd_select, 50, 0);
+                    mm_state = ""credits"";
+                }
+            }
+            else if (mm_sidx == 6)
+            {
+                audio_play_sound(snd_swing, 50, 0);
+                mm_state = ""select"";
+            }
+        }
+        else
+        {
+            if (mm_sidx == 0)
+            {
+                mm_german_patch = !mm_german_patch;
+                audio_play_sound(snd_select, 50, 0);
+                var _gpf = file_text_open_write(""german_patch.txt"");
+                file_text_write_string(_gpf, mm_german_patch ? ""1"" : ""0"");
+                file_text_close(_gpf);
+            }
+            else if (mm_sidx == 1)
+            {
+                if (mm_menu_lang == ""en"")
+                    mm_menu_lang = ""de"";
+                else
+                    mm_menu_lang = ""en"";
+                audio_play_sound(snd_select, 50, 0);
+                var _mlf = file_text_open_write(""menu_lang.txt"");
+                file_text_write_string(_mlf, mm_menu_lang);
+                file_text_close(_mlf);
+            }
+            else if (mm_sidx == 2)
+            {
+                mm_autoupdate = !mm_autoupdate;
+                audio_play_sound(snd_select, 50, 0);
+                var _uf = file_text_open_write(""autoupdate.txt"");
+                file_text_write_string(_uf, mm_autoupdate ? ""1"" : ""0"");
+                file_text_close(_uf);
+            }
+            else if (mm_sidx == 3)
+            {
+                if (_s_action)
+                {
+                    audio_play_sound(snd_select, 50, 0);
+                    mm_state = ""credits"";
+                }
+            }
+            else if (mm_sidx == 4)
+            {
+                audio_play_sound(snd_swing, 50, 0);
+                mm_state = ""select"";
+            }
+        }
+    }
+    else if (_cancel)
+    {
+        audio_play_sound(snd_swing, 50, 0);
+        mm_state = ""select"";
+    }
+}
+else if (mm_state == ""credits"")
+{
+    if (button1_p() || button2_p() || _cancel || keyboard_check_pressed(vk_space) || keyboard_check_pressed(vk_enter))
+    {
+        audio_play_sound(snd_swing, 50, 0);
+        mm_state = ""settings"";
     }
 }
 else if (mm_state == ""profile"")
@@ -435,8 +878,9 @@ draw_set_font((global.lang == ""en"") ? 2 : 1);
 draw_set_halign(fa_center);
 
 // === Header: CHAPTER N with flanking rules + yellow diamond accents ===
+var _is_de = (mm_menu_lang == ""de"");
 var _hy = _gh * 0.12;
-var _htxt = ""CHAPTER "" + string(mm_chapter);
+var _htxt = (_is_de ? ""KAPITEL "" : ""CHAPTER "") + string(mm_chapter);
 draw_set_color(c_white);
 draw_text(_cx, _hy, _htxt);
 var _hw = string_width(_htxt) / 2;
@@ -455,11 +899,356 @@ draw_set_color(c_white);
 
 if (mm_state == ""waiting"")
 {
-    draw_text(_cx, _gh * 0.45, ""Loading mod..."");
+    draw_text(_cx, _gh * 0.45, _is_de ? ""Mod wird geladen..."" : ""Loading mod..."");
+}
+else if (mm_state == ""settings"")
+{
+    draw_text(_cx, _gh * 0.165, _is_de ? ""EINSTELLUNGEN"" : ""SETTINGS"");
+
+    var _barw = 236;
+
+    if (mm_thesi_unlocked)
+    {
+        var _s_y = _gh * 0.23;
+        var _s_step = 38;
+
+        // Setting 0: Thesi Kris Texturen
+        var _y0 = _s_y;
+        if (mm_sidx == 0)
+        {
+            draw_set_color(c_yellow);
+            draw_rectangle(_cx - _barw, _y0 - 4, _cx + _barw, _y0 + 34, true);
+            mm_draw_soul(_cx - _barw + 12, _y0 + 11);
+        }
+        else
+        {
+            draw_set_color(c_white);
+        }
+        draw_text(_cx, _y0, _is_de ? (""Thesi-Kris Texturen:  "" + (mm_thesi_overlay ? ""[AKTIV]"" : ""[AUS]"")) : (""Thesi Kris Textures:  "" + (mm_thesi_overlay ? ""[ON]"" : ""[OFF]"")));
+        draw_set_color(mm_thesi_overlay ? c_lime : c_dkgray);
+        draw_text_transformed(_cx, _y0 + 18, _is_de ? ""Kris mit Thesi-Haaren auf Mods anwenden"" : ""Apply Kris with Thesi hair overlay to mods"", 0.7, 0.7, 0);
+
+        // Setting 1: Deutsch-Patch
+        var _y1 = _s_y + _s_step;
+        if (mm_sidx == 1)
+        {
+            draw_set_color(c_yellow);
+            draw_rectangle(_cx - _barw, _y1 - 4, _cx + _barw, _y1 + 34, true);
+            mm_draw_soul(_cx - _barw + 12, _y1 + 11);
+        }
+        else
+        {
+            draw_set_color(c_white);
+        }
+        draw_text(_cx, _y1, _is_de ? (""Deutsch-Patch (Spiel):  "" + (mm_german_patch ? ""[AKTIV]"" : ""[AUS]"")) : (""German Patch (Game):  "" + (mm_german_patch ? ""[ON]"" : ""[OFF]"")));
+        draw_set_color(mm_german_patch ? c_lime : c_dkgray);
+        draw_text_transformed(_cx, _y1 + 18, _is_de ? ""Deutsche Texte & Dialoge im Spiel aktivieren"" : ""Enable German translation and dialogue in-game"", 0.7, 0.7, 0);
+
+        // Setting 2: Menu Language
+        var _y2 = _s_y + _s_step * 2;
+        if (mm_sidx == 2)
+        {
+            draw_set_color(c_yellow);
+            draw_rectangle(_cx - _barw, _y2 - 4, _cx + _barw, _y2 + 34, true);
+            mm_draw_soul(_cx - _barw + 12, _y2 + 11);
+        }
+        else
+        {
+            draw_set_color(c_white);
+        }
+        draw_text(_cx, _y2, _is_de ? ""Menue-Sprache:  [Deutsch]"" : ""Menu Language:  [English]"");
+        draw_set_color(c_aqua);
+        draw_text_transformed(_cx, _y2 + 18, _is_de ? ""Sprache des Mod-Menues aendern"" : ""Switch Mod Selector language (English / Deutsch)"", 0.7, 0.7, 0);
+
+        // Setting 3: Auto-Update
+        var _y3 = _s_y + _s_step * 3;
+        if (mm_sidx == 3)
+        {
+            draw_set_color(c_yellow);
+            draw_rectangle(_cx - _barw, _y3 - 4, _cx + _barw, _y3 + 34, true);
+            mm_draw_soul(_cx - _barw + 12, _y3 + 11);
+        }
+        else
+        {
+            draw_set_color(c_white);
+        }
+        draw_text(_cx, _y3, _is_de ? (""Auto-Update:  "" + (mm_autoupdate ? ""[AKTIV]"" : ""[AUS]"")) : (""Auto-Update:  "" + (mm_autoupdate ? ""[ON]"" : ""[OFF]"")));
+        draw_set_color(mm_autoupdate ? c_lime : c_dkgray);
+        draw_text_transformed(_cx, _y3 + 18, _is_de ? ""Automatisch nach neuen Versionen suchen"" : ""Automatically check for new versions on GitHub"", 0.7, 0.7, 0);
+
+        // Setting 4: Thesi-Modus sperren & zuruecksetzen
+        var _y4 = _s_y + _s_step * 4;
+        if (mm_sidx == 4)
+        {
+            draw_set_color(c_yellow);
+            draw_rectangle(_cx - _barw, _y4 - 4, _cx + _barw, _y4 + 34, true);
+            mm_draw_soul(_cx - _barw + 12, _y4 + 11);
+        }
+        else
+        {
+            draw_set_color(c_white);
+        }
+        draw_text(_cx, _y4, _is_de ? ""Thesi-Modus sperren / zuruecksetzen"" : ""Lock & Reset Thesi Mode"");
+        draw_set_color(c_orange);
+        draw_text_transformed(_cx, _y4 + 18, _is_de ? ""Modus wieder sperren und als Secret verbergen"" : ""Relock Thesi mode and hide it as a secret again"", 0.7, 0.7, 0);
+
+        // Setting 5: Credits & Contributors
+        var _y5 = _s_y + _s_step * 5;
+        if (mm_sidx == 5)
+        {
+            draw_set_color(c_yellow);
+            draw_rectangle(_cx - _barw, _y5 - 4, _cx + _barw, _y5 + 34, true);
+            mm_draw_soul(_cx - _barw + 12, _y5 + 11);
+        }
+        else
+        {
+            draw_set_color(c_white);
+        }
+        draw_text(_cx, _y5, _is_de ? ""Credits & Danksagung  >"" : ""Credits & Contributors  >"");
+        draw_set_color(c_aqua);
+        draw_text_transformed(_cx, _y5 + 18, _is_de ? ""Urheber & Entstehung der Thesi-Sprites ansehen"" : ""View sprite origins and contributors"", 0.7, 0.7, 0);
+
+        // Setting 6: Zurueck / Back
+        var _y6 = _s_y + _s_step * 6;
+        if (mm_sidx == 6)
+        {
+            draw_set_color(c_yellow);
+            draw_rectangle(_cx - _barw, _y6 - 4, _cx + _barw, _y6 + 26, true);
+            mm_draw_soul(_cx - _barw + 12, _y6 + 7);
+        }
+        else
+        {
+            draw_set_color(c_white);
+        }
+        draw_text(_cx, _y6 + 2, _is_de ? ""< Zurueck"" : ""< Back"");
+    }
+    else
+    {
+        var _s_y = _gh * 0.26;
+        var _s_step = 45;
+
+        // LOCKED: Only 5 settings shown (0: German, 1: Lang, 2: Update, 3: Credits, 4: Back)
+        // Setting 0: Deutsch-Patch
+        var _y0 = _s_y;
+        if (mm_sidx == 0)
+        {
+            draw_set_color(c_yellow);
+            draw_rectangle(_cx - _barw, _y0 - 4, _cx + _barw, _y0 + 38, true);
+            mm_draw_soul(_cx - _barw + 12, _y0 + 13);
+        }
+        else
+        {
+            draw_set_color(c_white);
+        }
+        draw_text(_cx, _y0, _is_de ? (""Deutsch-Patch (Spiel):  "" + (mm_german_patch ? ""[AKTIV]"" : ""[AUS]"")) : (""German Patch (Game):  "" + (mm_german_patch ? ""[ON]"" : ""[OFF]"")));
+        draw_set_color(mm_german_patch ? c_lime : c_dkgray);
+        draw_text_transformed(_cx, _y0 + 20, _is_de ? ""Deutsche Texte & Dialoge im Spiel aktivieren"" : ""Enable German translation and dialogue in-game"", 0.7, 0.7, 0);
+
+        // Setting 1: Menu Language
+        var _y1 = _s_y + _s_step;
+        if (mm_sidx == 1)
+        {
+            draw_set_color(c_yellow);
+            draw_rectangle(_cx - _barw, _y1 - 4, _cx + _barw, _y1 + 38, true);
+            mm_draw_soul(_cx - _barw + 12, _y1 + 13);
+        }
+        else
+        {
+            draw_set_color(c_white);
+        }
+        draw_text(_cx, _y1, _is_de ? ""Menue-Sprache:  [Deutsch]"" : ""Menu Language:  [English]"");
+        draw_set_color(c_aqua);
+        draw_text_transformed(_cx, _y1 + 20, _is_de ? ""Sprache des Mod-Menues aendern"" : ""Switch Mod Selector language (English / Deutsch)"", 0.7, 0.7, 0);
+
+        // Setting 2: Auto-Update
+        var _y2 = _s_y + _s_step * 2;
+        if (mm_sidx == 2)
+        {
+            draw_set_color(c_yellow);
+            draw_rectangle(_cx - _barw, _y2 - 4, _cx + _barw, _y2 + 38, true);
+            mm_draw_soul(_cx - _barw + 12, _y2 + 13);
+        }
+        else
+        {
+            draw_set_color(c_white);
+        }
+        draw_text(_cx, _y2, _is_de ? (""Auto-Update:  "" + (mm_autoupdate ? ""[AKTIV]"" : ""[AUS]"")) : (""Auto-Update:  "" + (mm_autoupdate ? ""[ON]"" : ""[OFF]"")));
+        draw_set_color(mm_autoupdate ? c_lime : c_dkgray);
+        draw_text_transformed(_cx, _y2 + 20, _is_de ? ""Automatisch nach neuen Versionen suchen"" : ""Automatically check for new versions on GitHub"", 0.7, 0.7, 0);
+
+        // Setting 3: Credits & Contributors
+        var _y3 = _s_y + _s_step * 3;
+        if (mm_sidx == 3)
+        {
+            draw_set_color(c_yellow);
+            draw_rectangle(_cx - _barw, _y3 - 4, _cx + _barw, _y3 + 38, true);
+            mm_draw_soul(_cx - _barw + 12, _y3 + 13);
+        }
+        else
+        {
+            draw_set_color(c_white);
+        }
+        draw_text(_cx, _y3, _is_de ? ""Credits & Danksagung  >"" : ""Credits & Contributors  >"");
+        draw_set_color(c_aqua);
+        draw_text_transformed(_cx, _y3 + 20, _is_de ? ""Urheber & Entstehung ansehen"" : ""View creators and contributors"", 0.7, 0.7, 0);
+
+        // Setting 4: Zurueck / Back
+        var _y4 = _s_y + _s_step * 4;
+        if (mm_sidx == 4)
+        {
+            draw_set_color(c_yellow);
+            draw_rectangle(_cx - _barw, _y4 - 4, _cx + _barw, _y4 + 26, true);
+            mm_draw_soul(_cx - _barw + 12, _y4 + 7);
+        }
+        else
+        {
+            draw_set_color(c_white);
+        }
+        draw_text(_cx, _y4 + 2, _is_de ? ""< Zurueck"" : ""< Back"");
+    }
+
+    draw_set_color(c_white);
+    draw_text(_cx, _gh * 0.855, _is_de ? (""[Z]/("" + mm_b_confirm + "") Waehlen      [X]/("" + mm_b_back + "") Zurueck"") : (""[Z]/("" + mm_b_confirm + "") Select      [X]/("" + mm_b_back + "") Back""));
+}
+else if (mm_state == ""credits"")
+{
+    draw_text(_cx, _gh * 0.19, _is_de ? ""CREDITS & DANKSAGUNG"" : ""CREDITS & CONTRIBUTORS"");
+    draw_set_color(c_yellow);
+    if (mm_thesi_unlocked)
+        draw_text(_cx, _gh * 0.245, ""DELTARUNE - Thesi Edition"");
+    else
+        draw_text(_cx, _gh * 0.245, ""DELTARUNE Mod-Selector"");
+
+    if (mm_thesi_unlocked)
+    {
+        draw_set_color(c_aqua);
+        draw_text(_cx, _gh * 0.325, _is_de ? ""Original Thesi-Sprites (Kapitel 1 & 2):"" : ""Original Thesi Sprites (Chapters 1 & 2):"");
+        draw_set_color(c_white);
+        draw_text(_cx, _gh * 0.37, ""KajaKay_"");
+        draw_set_color(c_silver);
+        draw_text_transformed(_cx, _gh * 0.41, _is_de ? ""Urheber der urspruenglichen Thesi Kris Sprites."" : ""Creator of the original Thesi Kris sprites."", 0.75, 0.75, 0);
+
+        draw_set_color(c_aqua);
+        draw_text(_cx, _gh * 0.485, _is_de ? ""Kapitel 3, 4 & 5 Sprites:"" : ""Chapters 3, 4 & 5 Sprites:"");
+        draw_set_color(c_silver);
+        draw_text_transformed(_cx, _gh * 0.53, _is_de ? ""Die restlichen Sprites wurden basierend auf den Originalen"" : ""Remaining sprites were reused from originals or"", 0.75, 0.75, 0);
+        draw_text_transformed(_cx, _gh * 0.565, _is_de ? ""erneut benutzt oder mit KI-Unterstuetzung erstellt."" : ""generated with AI assistance."", 0.75, 0.75, 0);
+
+        draw_set_color(c_aqua);
+        draw_text(_cx, _gh * 0.64, _is_de ? ""Mod-Selector & Menue:"" : ""Mod Selector & Menu:"");
+        draw_set_color(c_white);
+        draw_text(_cx, _gh * 0.685, ""Saloran26"");
+        draw_set_color(c_silver);
+        draw_text_transformed(_cx, _gh * 0.725, _is_de ? ""Mod-Selector Menue & Speicherprofil-Verwaltung."" : ""Mod Selector menu & save profile manager."", 0.75, 0.75, 0);
+    }
+    else
+    {
+        draw_set_color(c_aqua);
+        draw_text(_cx, _gh * 0.36, _is_de ? ""Mod-Selector & Menue:"" : ""Mod Selector & Menu:"");
+        draw_set_color(c_white);
+        draw_text(_cx, _gh * 0.41, ""Saloran26"");
+        draw_set_color(c_silver);
+        draw_text_transformed(_cx, _gh * 0.46, _is_de ? ""In-Game Mod-Selector Menue & Speicherprofil-Verwaltung."" : ""In-game Mod Selector menu & save profile manager."", 0.75, 0.75, 0);
+
+        draw_set_color(c_aqua);
+        draw_text(_cx, _gh * 0.54, _is_de ? ""Deltarune Deutsch-Patches:"" : ""Deltarune German Translations:"");
+        draw_set_color(c_white);
+        draw_text(_cx, _gh * 0.585, ""GermanRune Team"");
+        draw_set_color(c_silver);
+        draw_text_transformed(_cx, _gh * 0.63, _is_de ? ""Deutsche Uebersetzung fuer Deltarune Kapitel 1 - 5."" : ""German translation for Deltarune Chapters 1 - 5."", 0.75, 0.75, 0);
+
+        draw_set_color(c_gray);
+        draw_text_transformed(_cx, _gh * 0.725, _is_de ? ""* (Ein Name mit 5 Buchstaben schlaeft im Menue...)"" : ""* (A 5-letter name sleeps in the menu...)"", 0.72, 0.72, 0);
+    }
+
+    draw_set_color(c_dkgray);
+    draw_text_transformed(_cx, _gh * 0.785, _is_de ? ""Patch-Tool: DeltaPatcher (xdelta)"" : ""Patch Tool: DeltaPatcher (xdelta)"", 0.7, 0.7, 0);
+
+    draw_set_color(c_white);
+    draw_text(_cx, _gh * 0.855, _is_de ? (""[Z]/("" + mm_b_confirm + "") oder [X]/("" + mm_b_back + "") Zurueck"") : (""[Z]/("" + mm_b_confirm + "") or [X]/("" + mm_b_back + "") Back""));
+}
+else if (mm_state == ""thesi_anim"")
+{
+    var _cy = _gh * 0.44;
+    var _teal = make_color_rgb(117, 250, 209);
+    var _pink = make_color_rgb(235, 0, 109);
+
+    // Orbiting sparkle stars with bright cores
+    for (var _p = 0; _p < 8; _p++)
+    {
+        var _ang = (mm_anim_timer * 0.05) + (_p * 0.785398);
+        var _dist = 72 + sin(mm_anim_timer * 0.1 + _p) * 10;
+        var _px = _cx + cos(_ang) * _dist;
+        var _py = _cy + sin(_ang) * _dist;
+        var _pcol = (_p mod 2 == 0) ? _teal : _pink;
+        var _sl = 6 + sin(mm_anim_timer * 0.15 + _p) * 2;
+
+        draw_set_color(_pcol);
+        draw_line_width(_px - _sl, _py, _px + _sl, _py, 2);
+        draw_line_width(_px, _py - _sl, _px, _py + _sl, 2);
+        draw_set_color(c_white);
+        draw_rectangle(_px - 1, _py - 1, _px + 1, _py + 1, false);
+    }
+
+    // Split SOUL in center (exact 16x16 Deltarune battle soul bitmap geometry)
+    // Perfectly symmetric: left half TEAL, right half PINK, meets seamlessly at _cx!
+    var _ps = 3.6 + sin(mm_anim_timer * 0.15) * 0.4;
+    var _x0s = [2, 1, 0, 0, 0, 0, 0, 0, 0, 0, 2, 2, 4, 4, 6, 6];
+    var _x1s = [4, 5, 6, 6, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7];
+
+    for (var _row = 0; _row < 16; _row++)
+    {
+        var _ry = _cy - (8 * _ps) + (_row * _ps);
+        var _x0 = _x0s[_row];
+        var _x1 = _x1s[_row];
+
+        // Left half (Teal): from (_cx - (8 - _x0)*_ps) to (_cx - (8 - _x1 - 1)*_ps - 1)
+        var _lx0 = _cx - (8 - _x0) * _ps;
+        var _lx1 = _cx - (8 - _x1 - 1) * _ps - 1;
+        draw_set_color(_teal);
+        draw_rectangle(_lx0, _ry, _lx1, _ry + _ps - 1, false);
+
+        // Right half (Pink): from (_cx + (7 - _x1)*_ps) to (_cx + (7 - _x0 + 1)*_ps - 1)
+        var _rx0 = _cx + (7 - _x1) * _ps;
+        var _rx1 = _cx + (7 - _x0 + 1) * _ps - 1;
+        draw_set_color(_pink);
+        draw_rectangle(_rx0, _ry, _rx1, _ry + _ps - 1, false);
+    }
+
+    // Text Header
+    draw_set_font((global.lang == ""en"") ? 2 : 1);
+    draw_set_halign(fa_center);
+
+    draw_set_color(c_yellow);
+    draw_text(_cx, _gh * 0.17, _is_de ? ""*  GEHEIMNIS ENTDECKT!  *"" : ""*  SECRET DISCOVERED!  *"");
+
+    var _title_col = ((mm_anim_timer mod 20) < 10) ? _pink : _teal;
+    draw_set_color(_title_col);
+    draw_text_transformed(_cx, _gh * 0.24, _is_de ? ""THESI-MODUS FREIGESCHALTET!"" : ""THESI MODE UNLOCKED!"", 1.2, 1.2, 0);
+
+    draw_set_color(c_white);
+    draw_text_transformed(_cx, _gh * 0.65, _is_de ? ""Kris' Thesi-Haare sind nun im Mod-Menue freigeschaltet!"" : ""Kris' Thesi hair is now unlocked in the Mod Menu!"", 0.85, 0.85, 0);
+
+    draw_set_color(c_silver);
+    draw_text_transformed(_cx, _gh * 0.71, _is_de ? ""Die Option 'Thesi-Kris Texturen' ist ab jetzt in den Einstellungen sichtbar."" : ""The 'Thesi Kris Textures' option is now visible in Settings."", 0.75, 0.75, 0);
+
+    if ((mm_anim_timer mod 40) < 25)
+    {
+        draw_set_color(c_yellow);
+        draw_text(_cx, _gh * 0.84, _is_de ? ""[Z] / [Enter] / (A) Fortfahren"" : ""[Z] / [Enter] / (A) Continue"");
+    }
+
+    if (mm_anim_timer < 12)
+    {
+        draw_set_alpha((12 - mm_anim_timer) / 12);
+        draw_set_color(c_white);
+        draw_rectangle(0, 0, _gw, _gh, false);
+        draw_set_alpha(1);
+    }
 }
 else if (mm_state == ""naming"")
 {
-    draw_text(_cx, _gh * 0.21, ""NAME NEW PROFILE"");
+    draw_text(_cx, _gh * 0.21, _is_de ? ""NEUES PROFIL BENENNEN"" : ""NAME NEW PROFILE"");
     draw_set_color(c_silver);
     draw_text(_cx, _gh * 0.27, ""Mod: "" + mm_moddisp);
     draw_set_color(c_white);
@@ -474,7 +1263,7 @@ else if (mm_state == ""naming"")
     draw_set_color(c_white);
     draw_text(_cx, _gh * 0.45, _disp);
 
-    draw_text(_cx, _gh * 0.855, ""Type a name    [Enter] Create    [X]/[Esc] Back"");
+    draw_text(_cx, _gh * 0.855, _is_de ? ""Name eingeben    [Enter] Erstellen    [Esc] Zurueck"" : ""Type a name    [Enter] Create    [Esc] Back"");
 }
 else if (mm_state == ""confirmdelete"")
 {
@@ -486,11 +1275,11 @@ else if (mm_state == ""confirmdelete"")
     var _shy = random_range(-_mag, _mag);
 
     draw_set_color(c_red);
-    draw_text(_cx + _shx, _gh * 0.21 + _shy, ""DELETE PROFILE"");
+    draw_text(_cx + _shx, _gh * 0.21 + _shy, _is_de ? ""PROFIL LOESCHEN"" : ""DELETE PROFILE"");
     draw_set_color(c_yellow);
     draw_text(_cx + _shx, _gh * 0.32 + _shy, mm_target);
     draw_set_color(c_white);
-    draw_text(_cx + _shx, _gh * 0.40 + _shy, ""This erases its saves. This cannot be undone."");
+    draw_text(_cx + _shx, _gh * 0.40 + _shy, _is_de ? ""Loescht die Spielstaende unwiderruflich."" : ""This erases its saves. This cannot be undone."");
 
     var _bw = 220;
     var _bx = _cx + _shx;
@@ -501,11 +1290,11 @@ else if (mm_state == ""confirmdelete"")
     draw_rectangle(_bx - _bw + 2, _by2 - 8, _bx - _bw + 2 + (2 * _bw - 4) * _prog, _by2 + 8, false);
     draw_set_color(c_white);
 
-    draw_text(_cx, _gh * 0.855, ""HOLD [Z]/[A] to delete  (3s)     [X]/[Esc] Cancel"");
+    draw_text(_cx, _gh * 0.855, _is_de ? (""HALTEN [Z]/("" + mm_b_confirm + "") zum Loeschen (3s)     [X]/("" + mm_b_back + "") Abbrechen"") : (""HOLD [Z]/("" + mm_b_confirm + "") to delete  (3s)     [X]/("" + mm_b_back + "") Cancel""));
 }
 else if (mm_state == ""profilewait"")
 {
-    draw_text(_cx, _gh * 0.45, ""Please wait..."");
+    draw_text(_cx, _gh * 0.45, _is_de ? ""Bitte warten..."" : ""Please wait..."");
 }
 else
 {
@@ -516,14 +1305,14 @@ else
 
     if (_isprofile)
     {
-        draw_text(_cx, _gh * 0.21, ""SELECT SAVE PROFILE"");
+        draw_text(_cx, _gh * 0.21, _is_de ? ""SPEICHERPROFIL WAEHLEN"" : ""SELECT SAVE PROFILE"");
         draw_set_color(c_silver);
         draw_text(_cx, _gh * 0.265, ""Mod: "" + mm_moddisp);
         draw_set_color(c_white);
     }
     else
     {
-        draw_text(_cx, _gh * 0.21, ""SELECT MOD"");
+        draw_text(_cx, _gh * 0.21, _is_de ? ""MOD WAEHLEN"" : ""SELECT MOD"");
     }
 
     // Scrolling list: only _maxvis rows visible, selection kept centered.
@@ -555,14 +1344,21 @@ else
             // yellow selection bar + red SOUL heart at its left
             draw_set_color(c_yellow);
             draw_rectangle(_cx - _barw, _yy - 3, _cx + _barw, _yy + 24, true);
-            draw_sprite_ext(spr_heart, 0, _cx - _barw + 12, _yy + 6, 1, 1, 0, c_white, 1);
-            draw_set_color(c_yellow);
+            mm_draw_soul(_cx - _barw + 12, _yy + 6);
         }
         else
         {
             draw_set_color(c_white);
         }
-        draw_text(_cx, _yy, _list[_i]);
+        var _entry_text = _list[_i];
+        if (_isprofile)
+        {
+            if (_i == 0)
+                _entry_text = _is_de ? ""Standard-Spielstaende"" : ""Standard-Saves"";
+            else if (_i == array_length(mm_profiles) - 1)
+                _entry_text = _is_de ? ""+ Neues Profil"" : ""+ New Profile"";
+        }
+        draw_text(_cx, _yy, _entry_text);
     }
 
     // Scroll arrows when there are more entries above/below the window.
@@ -576,14 +1372,40 @@ else
     }
 
     if (_isprofile && (_sel > 0) && (_sel < _total - 1))
-        draw_text(_cx, _gh * 0.855, ""[Z] Confirm    [Del]/[Y] Delete    [X] Back"");
+        draw_text(_cx, _gh * 0.855, _is_de ? (""[Z]/("" + mm_b_confirm + "") Bestaetigen   [Entf]/("" + mm_b_delete + "") Loeschen   [X]/("" + mm_b_back + "") Zurueck"") : (""[Z]/("" + mm_b_confirm + "") Confirm   [Del]/("" + mm_b_delete + "") Delete   [X]/("" + mm_b_back + "") Back""));
     else
-        draw_text(_cx, _gh * 0.855, ""[Z]/[Enter] Confirm      [X]/[Shift] Back"");
+        draw_text(_cx, _gh * 0.855, _is_de ? (""[Z]/("" + mm_b_confirm + "") Bestaetigen      [X]/("" + mm_b_back + "") Zurueck"") : (""[Z]/("" + mm_b_confirm + "") Confirm      [X]/("" + mm_b_back + "") Back""));
+
+    if (!_isprofile)
+    {
+        draw_set_color(c_yellow);
+        if (_is_de)
+        {
+            if (mm_thesi_unlocked)
+                draw_text(_cx, _gh * 0.815, ""[S]/("" + mm_b_settings + "") Einstellungen   |   Thesi: "" + (mm_thesi_overlay ? ""[AN]"" : ""[AUS]"") + ""   Deutsch: "" + (mm_german_patch ? ""[AN]"" : ""[AUS]""));
+            else
+                draw_text(_cx, _gh * 0.815, ""[S]/("" + mm_b_settings + "") Einstellungen   |   Deutsch: "" + (mm_german_patch ? ""[AN]"" : ""[AUS]""));
+        }
+        else
+        {
+            if (mm_thesi_unlocked)
+                draw_text(_cx, _gh * 0.815, ""[S]/("" + mm_b_settings + "") Settings   |   Thesi: "" + (mm_thesi_overlay ? ""[ON]"" : ""[OFF]"") + ""   German: "" + (mm_german_patch ? ""[ON]"" : ""[OFF]""));
+            else
+                draw_text(_cx, _gh * 0.815, ""[S]/("" + mm_b_settings + "") Settings   |   German: "" + (mm_german_patch ? ""[ON]"" : ""[OFF]""));
+        }
+        draw_set_color(c_white);
+    }
 }
 
-// Credit line -- clear above the bottom frame.
-draw_set_color(c_gray);
-draw_text(_cx, _gh * 0.90, ""Mod-Selector v1.2.0 by Saloran26  -  made with Claude AI"");
+if (mm_state != ""thesi_anim"")
+{
+    // Credit lines -- clear above the bottom frame.
+    draw_set_color(c_gray);
+    if (mm_thesi_unlocked)
+        draw_text(_cx, _gh * 0.905, ""Mod-Selector v1.3.0 by Saloran26 & KajaKay_  -  Thesi Edition"");
+    else
+        draw_text(_cx, _gh * 0.905, ""Mod-Selector v1.3.0 by Saloran26"");
+}
 
 draw_set_halign(fa_left);
 draw_set_color(c_white);
@@ -628,7 +1450,7 @@ string GUARD_GML = @"if (variable_global_exists(""modmenu_open"") && global.modm
 // left (same left edge x+16, same color/alpha/font/scale already set above it).
 string VERSION_ANCHOR = "draw_text_transformed(x + 16, y + 40, _version_text, _scale, _scale, 0);";
 string VERSION_CREDIT = VERSION_ANCHOR + "\n"
-    + "draw_text_transformed(x + 16, y + 56, \"Mod-Selector v1.2.0 by Saloran26\", _scale, _scale, 0);";
+    + "draw_text_transformed(x + 16, y + 56, \"Mod-Selector v1.3.0\", _scale, _scale, 0);";
 
 // ----------------------------------------------------------------------------
 //  1) Create obj_modmenu and wire its three events.
