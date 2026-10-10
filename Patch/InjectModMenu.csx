@@ -1402,9 +1402,9 @@ if (mm_state != ""thesi_anim"")
     // Credit lines -- clear above the bottom frame.
     draw_set_color(c_gray);
     if (mm_thesi_unlocked)
-        draw_text(_cx, _gh * 0.905, ""Mod-Selector v1.3.1 by Saloran26 & KajaKay_  -  Thesi Edition"");
+        draw_text(_cx, _gh * 0.905, ""Mod-Selector v1.3.2 by Saloran26 & KajaKay_  -  Thesi Edition"");
     else
-        draw_text(_cx, _gh * 0.905, ""Mod-Selector v1.3.1 by Saloran26"");
+        draw_text(_cx, _gh * 0.905, ""Mod-Selector v1.3.2 by Saloran26"");
 }
 
 draw_set_halign(fa_left);
@@ -1415,25 +1415,11 @@ draw_set_color(c_white);
 string HOOK_GML = @"
     if (!variable_instance_exists(id, ""modmenu_done"") || !modmenu_done)
     {
-        var _mm_count = 0;
-        if (file_exists(""modlist.txt""))
-        {
-            var _mm_f = file_text_open_read(""modlist.txt"");
-            while (!file_text_eof(_mm_f))
-            {
-                var _mm_line = file_text_read_string(_mm_f);
-                file_text_readln(_mm_f);
-                var _mm_sep = string_pos(""|"", _mm_line);
-                if (_mm_sep > 0)
-                {
-                    if (real(string_copy(_mm_line, 1, _mm_sep - 1)) == _target_chapter)
-                        _mm_count += 1;
-                }
-            }
-            file_text_close(_mm_f);
-        }
-
-        if (_mm_count > 0)
+        // Always show the menu for a real chapter launch (1-5), even when no mod
+        // is installed for that chapter -- so Vanilla, the save profiles and the
+        // settings are always reachable. The menu reads modlist.txt itself and
+        // simply shows only ""Vanilla"" when there are no mods for the chapter.
+        if (_target_chapter >= 1 && _target_chapter <= 5)
         {
             global.modmenu_parent  = id;
             global.modmenu_chapter = _target_chapter;
@@ -1450,7 +1436,7 @@ string GUARD_GML = @"if (variable_global_exists(""modmenu_open"") && global.modm
 // left (same left edge x+16, same color/alpha/font/scale already set above it).
 string VERSION_ANCHOR = "draw_text_transformed(x + 16, y + 40, _version_text, _scale, _scale, 0);";
 string VERSION_CREDIT = VERSION_ANCHOR + "\n"
-    + "draw_text_transformed(x + 16, y + 56, \"Mod-Selector v1.3.1\", _scale, _scale, 0);";
+    + "draw_text_transformed(x + 16, y + 56, \"Mod-Selector v1.3.2\", _scale, _scale, 0);";
 
 // ----------------------------------------------------------------------------
 //  1) Create obj_modmenu and wire its three events.

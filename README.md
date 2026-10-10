@@ -3,7 +3,8 @@
 Ein In-Game-Mod-Auswahlmenü für **Deltarune** (Steam). Startet das Spiel ganz
 normal über Steam – beim Auswählen eines Kapitels erscheint ein Menü, in dem du
 zwischen **Vanilla** und deinen installierten **Mods** wählst (Tastatur **oder**
-Controller). Ist für ein Kapitel kein Mod installiert, startet es ganz normal.
+Controller). Das Menü erscheint bei jedem Kapitelstart – auch ohne installierten
+Mod (dann nur **Vanilla**), damit Save-Profile und Einstellungen immer erreichbar sind.
 
 Nach der Mod-Auswahl wählst du zusätzlich ein **Save-Profil**: entweder deine
 normalen **Standard-Saves** oder ein eigenes benanntes Profil (eigene 3
@@ -202,7 +203,9 @@ dem Menü-Patch.
   - **Profil löschen:** markiertes Profil → **Entf** (Controller **Y**) → dann zur
     Sicherheit **Z / A ~3 s gedrückt halten** (der Bildschirm wackelt, Balken füllt
     sich); Loslassen oder **X** bricht ab.
-- Kein Mod für das Kapitel → startet direkt normal (ohne Profil-Auswahl).
+- Das Menü erscheint bei **jedem** Kapitelstart (auch ohne installierten Mod) – so
+  sind Vanilla, die Save-Profile und das Einstellungsmenü immer erreichbar. Ohne
+  Mod steht in der Mod-Liste einfach nur **Vanilla**.
 
 ## ⚙️ Einstellungsmenü (ab v1.3.0)
 Im Mod-Menü mit **S** oder **Tab** öffnen (Controller: **Select/Back** oder **L1**).

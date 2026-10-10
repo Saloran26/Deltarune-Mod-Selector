@@ -1,6 +1,6 @@
 # Installed Mod-Selector version. The self-updater compares this against the
 # latest GitHub release tag. Bump it whenever the shipped files change.
-$script:SELECTOR_VERSION = '1.3.1'
+$script:SELECTOR_VERSION = '1.3.2'
 
 function Get-ModLoaderConfig {
     param([Parameter(Mandatory)][string]$GameDir)
