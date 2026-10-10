@@ -46,7 +46,7 @@ sauber auf Vanilla zurückgesetzt.
 | **Deltarune** (5-Kapitel-Version) | Toby Fox, über Steam | **Pflicht** | ist dein Spielordner |
 | **UndertaleModTool** | [UnderminersTeam](https://github.com/UnderminersTeam/UndertaleModTool/releases) | **Pflicht** für den Menü-Einbau | einmal von Hand benutzen (Schritt 2); danach lädt der Loader die CLI-Version selbst nach `_tools\UTMT_CLI\` |
 | **Mods** (z. B. Kaizo Knight, Hardtype, Roaring Edition, Boss Rush) | die jeweiligen Mod-Autoren | optional | je ein Ordner in `mods\` – siehe [Einen Mod hinzufügen](#-einen-mod-hinzufügen) |
-| **Deutsch-Patch** | GermanRune-Team | optional | nach `_germancache\` – siehe [Deutsch-Patch einfügen](#-deutsch-patch-einfügen) |
+| **Deutsch-Patch** | [GERMANRUNE](https://gamebanana.com/mods/629265) (Chexle / GermanRune-Team) | optional | nach `_germancache\` – siehe [Deutsch-Patch einfügen](#-deutsch-patch-einfügen) |
 | **xdelta3** oder **DeltaPatcher** | jeweilige Autoren | nur für den Deutsch-Patch | irgendwo auf deinem PC |
 
 ---
@@ -147,10 +147,11 @@ Der Loader erkennt am Ordner `chapterN_windows` automatisch das Kapitel. Fertig.
 
 ## 🇩🇪 Deutsch-Patch einfügen
 
-Die deutsche Übersetzung stammt vom **GermanRune-Team** und ist hier **nicht**
-enthalten. Der Mod-Selector schaltet sie nur an und aus. So richtest du sie ein:
+Die deutsche Übersetzung ist [**GERMANRUNE**](https://gamebanana.com/mods/629265) von Chexle und dem
+GermanRune-Team und ist hier **nicht** enthalten. Der Mod-Selector schaltet sie nur an und aus. So richtest du sie ein:
 
-1. Lade das Patch-Paket beim GermanRune-Team herunter. Darin liegen je Kapitel
+1. Lade das Patch-Paket bei GameBanana herunter: https://gamebanana.com/mods/629265
+   Darin liegen je Kapitel
    eine `KapitelN_Deutsch_….xdelta` sowie die Ordner `chapter1_windows\lang\`
    und `chapter5_windows\vid\`.
 2. Lege in deinem Deltarune-Ordner den Ordner `_germancache` an.
@@ -335,7 +336,8 @@ Deltarune und seine Figuren gehören Toby Fox.
 - **Mod-Selector, Menü & Thesi-Sprites Kapitel 3–5:** Saloran26
 - **Thesi-Kris-Sprites Kapitel 1 & 2:** basieren auf den Original-Sprites von
   **KajaKay_** (mit Erlaubnis verwendet)
-- **Deutsche Übersetzung:** GermanRune-Team (nicht in diesem Repository enthalten)
+- **Deutsche Übersetzung:** [GERMANRUNE](https://gamebanana.com/mods/629265) von Chexle und dem GermanRune-Team
+  (nicht in diesem Repository enthalten)
 - **UndertaleModTool:** UnderminersTeam
 - **Deltarune:** Toby Fox
 
