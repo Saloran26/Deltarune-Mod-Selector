@@ -1,6 +1,6 @@
 # Installed Mod-Selector version. The self-updater compares this against the
 # latest GitHub release tag. Bump it whenever the shipped files change.
-$script:SELECTOR_VERSION = '1.3.2'
+$script:SELECTOR_VERSION = '1.4.0'
 
 function Get-ModLoaderConfig {
     param([Parameter(Mandatory)][string]$GameDir)
@@ -27,6 +27,10 @@ function Get-ModLoaderConfig {
         ThesiOverlayPath = Join-Path $signal "thesi_overlay.txt"   # "1"/"0"; toggled in settings menu
         ThesiCacheDir    = Join-Path $GameDir "_thesicache"        # cached patched mods for instant loading
         ThesiSpritesDir  = Join-Path (Join-Path $GameDir "_tools") "ThesiSprites"
+        # --- 60 FPS Overhaul Patch support -----------------------------------
+        Fps60PatchPath   = Join-Path $signal "fps60_patch.txt"     # "1"/"0"; toggled in settings menu
+        Fps60CacheDir    = Join-Path $GameDir "_fpscache"          # pre-patched 60 FPS data for instant loading
+        Fps60PatchesDir  = Join-Path (Join-Path $GameDir "_tools") "60fps_patches"
         # --- German Translation Patch support --------------------------------
         GermanPatchPath  = Join-Path $signal "german_patch.txt"    # "1"/"0"; toggled in settings menu
         GermanCacheDir   = Join-Path $GameDir "_germancache"       # pre-patched German data for instant loading
@@ -316,7 +320,8 @@ function Apply-ThesiOverlay {
     param(
         [Parameter(Mandatory)]$cfg,
         [Parameter(Mandatory)][int]$Chapter,
-        $Mod = $null
+        $Mod = $null,
+        [switch]$IsFps60
     )
     if (-not (Get-ThesiOverlaySetting $cfg)) { return }
     if ($Chapter -le 0) { return }
@@ -329,13 +334,19 @@ function Apply-ThesiOverlay {
     if (-not (Test-Path $liveWin)) { return }
 
     if (-not (Test-Path $cfg.ThesiCacheDir)) { New-Item -ItemType Directory -Path $cfg.ThesiCacheDir -Force | Out-Null }
-    $modKey = if ($Mod) { $Mod.Name -replace '[^a-zA-Z0-9_-]', '_' } else { "vanilla" }
+    $modKey = if ($IsFps60) { "fps60" } elseif ($Mod) { $Mod.Name -replace '[^a-zA-Z0-9_-]', '_' } else { "vanilla" }
     $cacheDir = Join-Path $cfg.ThesiCacheDir "${modKey}_ch${Chapter}"
     $cachedWin = Join-Path $cacheDir "data.win"
 
     # 1) If cached version exists and is valid, copy instantly:
     if (Test-Path $cachedWin) {
-        $sourceWin = if ($Mod) { Join-Path (Join-Path $Mod.Path $chFolder) "data.win" } else { Join-Path (Join-Path $cfg.VanillaDir $chFolder) "data.win" }
+        $sourceWin = if ($IsFps60) {
+            Join-Path (Join-Path $cfg.Fps60CacheDir $chFolder) "data.win"
+        } elseif ($Mod) {
+            Join-Path (Join-Path $Mod.Path $chFolder) "data.win"
+        } else {
+            Join-Path (Join-Path $cfg.VanillaDir $chFolder) "data.win"
+        }
         $cacheValid = $true
         if ($sourceWin -and (Test-Path $sourceWin)) {
             if ((Get-Item $sourceWin).LastWriteTimeUtc -gt (Get-Item $cachedWin).LastWriteTimeUtc) {
@@ -372,6 +383,20 @@ function Apply-ThesiOverlay {
         Move-Item -LiteralPath $tmpWin -Destination $cachedWin -Force
         Copy-Item -LiteralPath $cachedWin -Destination $liveWin -Force
     }
+}
+
+function Get-Fps60PatchSetting {
+    param([Parameter(Mandatory)]$cfg)
+    if (-not (Test-Path $cfg.Fps60PatchPath)) { return $false }
+    try {
+        return ((Get-Content -LiteralPath $cfg.Fps60PatchPath -Raw).Trim() -eq '1')
+    } catch { return $false }
+}
+
+function Set-Fps60PatchSetting {
+    param([Parameter(Mandatory)]$cfg, [bool]$Enabled)
+    $utf8 = New-Object System.Text.UTF8Encoding($false)
+    try { [System.IO.File]::WriteAllText($cfg.Fps60PatchPath, ($(if ($Enabled) { '1' } else { '0' })), $utf8) } catch {}
 }
 
 function Get-GermanPatchSetting {
@@ -413,6 +438,7 @@ function Apply-ChapterVariant {
     Restore-Vanilla $cfg
     if ($Chapter -le 0) { return }
 
+    $fps60Active = Get-Fps60PatchSetting $cfg
     $thesiActive = Get-ThesiOverlaySetting $cfg
     $germanActive = Get-GermanPatchSetting $cfg
 
@@ -449,7 +475,72 @@ function Apply-ChapterVariant {
         return
     }
 
-    # 2) If 'vanilla' is selected:
+    # 2) If 60 FPS Overhaul is active for vanilla:
+    $fpsChapterWin = Join-Path (Join-Path $cfg.Fps60CacheDir $chFolder) "data.win"
+    $fpsGermanWin = Join-Path (Join-Path $cfg.Fps60CacheDir "german_ch${Chapter}") "data.win"
+    $fpsThesiWin = Join-Path (Join-Path $cfg.ThesiCacheDir "fps60_ch${Chapter}") "data.win"
+    $fpsGermanThesiWin = Join-Path (Join-Path $cfg.ThesiCacheDir "fps60_german_ch${Chapter}") "data.win"
+
+    if ($fps60Active -and (Test-Path $fpsChapterWin)) {
+        # Determine which 60 FPS build to use based on German and Thesi flags:
+        $srcWin = $null
+        if ($germanActive -and $thesiActive) {
+            if (Test-Path $fpsGermanThesiWin) {
+                $srcWin = $fpsGermanThesiWin
+            } elseif (Test-Path $fpsGermanWin) {
+                $srcWin = $fpsGermanWin
+            } else {
+                $srcWin = $fpsChapterWin
+            }
+        }
+        elseif ($germanActive -and -not $thesiActive) {
+            if (Test-Path $fpsGermanWin) {
+                $srcWin = $fpsGermanWin
+            } else {
+                $srcWin = $fpsChapterWin
+            }
+        }
+        elseif (-not $germanActive -and $thesiActive) {
+            if (Test-Path $fpsThesiWin) {
+                $srcWin = $fpsThesiWin
+            } else {
+                $srcWin = $fpsChapterWin
+            }
+        }
+        else {
+            $srcWin = $fpsChapterWin
+        }
+
+        $filesToApply = @(
+            [pscustomobject]@{ RelPath = "$chFolder\data.win"; Src = $srcWin }
+        )
+        if ($germanActive -and $Chapter -eq 1) {
+            $gLang = Join-Path (Join-Path (Join-Path $cfg.GermanCacheDir "chapter1_windows") "lang") "lang_en.json"
+            if (Test-Path $gLang) {
+                $filesToApply += [pscustomobject]@{ RelPath = "chapter1_windows\lang\lang_en.json"; Src = $gLang }
+            }
+        }
+        if ($germanActive -and $Chapter -eq 5) {
+            $gVid = Join-Path (Join-Path (Join-Path $cfg.GermanCacheDir "chapter5_windows") "vid") "ch5_intro_en.mp4"
+            if (Test-Path $gVid) {
+                $filesToApply += [pscustomobject]@{ RelPath = "chapter5_windows\vid\ch5_intro_en.mp4"; Src = $gVid }
+            }
+        }
+
+        $manifest = @()
+        foreach ($f in $filesToApply) {
+            $existed = Backup-FileIfNeeded $cfg $f.RelPath
+            $manifest += [pscustomobject]@{ path = $f.RelPath; existedInVanilla = $existed }
+            $dst = Join-Path $cfg.GameDir $f.RelPath
+            $dstDir = Split-Path $dst -Parent
+            if (-not (Test-Path $dstDir)) { New-Item -ItemType Directory -Path $dstDir -Force | Out-Null }
+            Copy-Item -LiteralPath $f.Src -Destination $dst -Force
+        }
+        $manifest | ConvertTo-Json -Depth 5 | Set-Content -Path $cfg.ManifestPath -Encoding utf8
+        return
+    }
+
+    # 3) If 'vanilla' (30 FPS) is selected:
     # The German patch is optional. If there is no German build for this chapter,
     # behave as if the toggle were off, so the Thesi overlay still applies.
     $germanChapterWin = Join-Path (Join-Path $cfg.GermanCacheDir $chFolder) "data.win"
@@ -647,7 +738,7 @@ function Invoke-DataWinRepatch {
     if (-not (Test-Path $cfg.ToolsDir)) { New-Item -ItemType Directory -Path $cfg.ToolsDir -Force | Out-Null }
     $out = Join-Path $cfg.ToolsDir "data_patched.win"
     if (Test-Path $out) { Remove-Item -LiteralPath $out -Force }
-    try { & $cli load $cfg.DataWinBackup -s $cfg.InjectorPath -o $out 2>&1 | Out-Null } catch { return $false }
+    try { cmd /c "echo. | `"$cli`" load `"$($cfg.DataWinBackup)`" -s `"$($cfg.InjectorPath)`" -o `"$out`"" | Out-Null } catch { return $false }
     if (-not (Test-Path $out)) { return $false }
     if (-not (Test-DataWinPatched $out $cfg.PatchMarker)) { Remove-Item -LiteralPath $out -Force -ErrorAction SilentlyContinue; return $false }
     Copy-Item -LiteralPath $out -Destination $cfg.DataWin -Force
@@ -837,4 +928,4 @@ function Start-ModLoader {
     }
 }
 
-Export-ModuleMember -Function Get-ModLoaderConfig, Backup-FileIfNeeded, Get-InstalledMods, Write-ModList, Restore-Vanilla, Apply-Mod, Clear-Signals, Read-Request, Set-Ready, Start-ModLoader, Get-ChapterSaveFiles, Write-ProfileList, Get-ProfileDir, Swap-InProfile, Swap-OutProfile, New-Profile, Remove-Profile, Read-ProfileCmd, Set-ProfileReady, Get-SelectorVersion, Compare-SemVer, Test-DataWinPatched, Get-SelectorSettings, Set-SelectorSettings, Get-LatestSelectorRelease, Get-UtmtCli, Invoke-DataWinRepatch, Invoke-SelectorSelfUpdate, Invoke-UpdateCheck, Get-ThesiOverlaySetting, Set-ThesiOverlaySetting, Apply-ThesiOverlay, Get-GermanPatchSetting, Set-GermanPatchSetting, Get-MenuLangSetting, Set-MenuLangSetting, Apply-ChapterVariant
+Export-ModuleMember -Function Get-ModLoaderConfig, Backup-FileIfNeeded, Get-InstalledMods, Write-ModList, Restore-Vanilla, Apply-Mod, Clear-Signals, Read-Request, Set-Ready, Start-ModLoader, Get-ChapterSaveFiles, Write-ProfileList, Get-ProfileDir, Swap-InProfile, Swap-OutProfile, New-Profile, Remove-Profile, Read-ProfileCmd, Set-ProfileReady, Get-SelectorVersion, Compare-SemVer, Test-DataWinPatched, Get-SelectorSettings, Set-SelectorSettings, Get-LatestSelectorRelease, Get-UtmtCli, Invoke-DataWinRepatch, Invoke-SelectorSelfUpdate, Invoke-UpdateCheck, Get-ThesiOverlaySetting, Set-ThesiOverlaySetting, Apply-ThesiOverlay, Get-Fps60PatchSetting, Set-Fps60PatchSetting, Get-GermanPatchSetting, Set-GermanPatchSetting, Get-MenuLangSetting, Set-MenuLangSetting, Apply-ChapterVariant
