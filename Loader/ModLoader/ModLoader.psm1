@@ -679,22 +679,10 @@ function Start-LosslessScalingIfEnabled {
 
         Set-LosslessScalingProfile $cfg
 
-        # Prefer launching through Steam URL so Steam DRM and background headless mode work seamlessly
-        $started = $false
-        try {
-            $null = Start-Process -FilePath "steam://rungameid/993090" -PassThru
-            $started = $true
-        } catch {}
-
-        if (-not $started) {
-            try {
-                $null = Start-Process -FilePath $lssExe -WindowStyle Minimized -PassThru
-                $started = $true
-            } catch {}
-        }
-        if ($started) {
-            $script:StartedLosslessScaling = $true
-        }
+        # Launch directly with -StartMinimized so Lossless Scaling starts 100% headless in the system tray without opening any GUI window
+        $lssWorkingDir = Split-Path -Path $lssExe -Parent
+        $null = Start-Process -FilePath $lssExe -ArgumentList "-StartMinimized" -WorkingDirectory $lssWorkingDir -WindowStyle Minimized -PassThru
+        $script:StartedLosslessScaling = $true
     } catch {}
 }
 
@@ -1451,6 +1439,8 @@ function Start-ModLoader {
                 }
                 Write-ProfileList $cfg
                 Set-Ready $cfg
+                # Reset goneCount so chapter transitions (~game_change) have plenty of time without killing the loader
+                $goneCount = 0
             }
 
             # In-game profile management (create / delete a profile folder).
@@ -1532,7 +1522,7 @@ function Start-ModLoader {
             $alive = @(Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.ProcessName -like '*ELTARUNE*' })
             if ($alive.Count -gt 0) { $sawGame = $true; $goneCount = 0 }
             elseif ($sawGame) { $goneCount++ }
-            if ($sawGame -and $goneCount -ge 20) { break }  # ~3s ohne Prozess = beendet
+            if ($sawGame -and $goneCount -ge 80) { break }  # ~12s ohne Prozess = echtes Beenden (uebersteht Kapitelwechsel problemlos)
 
             Start-Sleep -Milliseconds 150
         }
