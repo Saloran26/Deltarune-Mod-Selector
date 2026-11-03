@@ -641,7 +641,7 @@ function Set-LosslessScalingProfile {
         _Set-LssSubnode $deltaruneProfile "Title" "DELTARUNE"
         _Set-LssSubnode $deltaruneProfile "Path" "DELTARUNE.exe;*DELTARUNE*"
         _Set-LssSubnode $deltaruneProfile "AutoScale" "true"
-        _Set-LssSubnode $deltaruneProfile "AutoScaleDelay" "2"
+        _Set-LssSubnode $deltaruneProfile "AutoScaleDelay" "3"
         _Set-LssSubnode $deltaruneProfile "ScalingType" "Off"
         _Set-LssSubnode $deltaruneProfile "FrameGeneration" "LSFG3"
         _Set-LssSubnode $deltaruneProfile "LSFGSize" ($(if ($Mode -eq 'performance') { "PERFORMANCE" } else { "BALANCED" }))
