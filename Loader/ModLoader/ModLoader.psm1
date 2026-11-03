@@ -646,16 +646,16 @@ function Set-LosslessScalingProfile {
         _Set-LssSubnode $deltaruneProfile "FrameGeneration" "LSFG3"
         _Set-LssSubnode $deltaruneProfile "LSFGSize" ($(if ($Mode -eq 'performance') { "PERFORMANCE" } else { "BALANCED" }))
         _Set-LssSubnode $deltaruneProfile "LSFGFlowScale" $Flow
-        _Set-LssSubnode $deltaruneProfile "SyncMode" "VSYNC1"
+        _Set-LssSubnode $deltaruneProfile "SyncMode" "DEFAULT"
         _Set-LssSubnode $deltaruneProfile "CaptureApi" "DXGI"
-        _Set-LssSubnode $deltaruneProfile "DrawFps" "false"
+        _Set-LssSubnode $deltaruneProfile "DrawFps" "true"
 
         switch ($TargetFps) {
             "60"  { _Set-LssSubnode $deltaruneProfile "LSFG3Mode1" "FIXED"; _Set-LssSubnode $deltaruneProfile "LSFG3Multiplier" "2"; _Set-LssSubnode $deltaruneProfile "LSFG3Target" "60" }
             "90"  { _Set-LssSubnode $deltaruneProfile "LSFG3Mode1" "FIXED"; _Set-LssSubnode $deltaruneProfile "LSFG3Multiplier" "3"; _Set-LssSubnode $deltaruneProfile "LSFG3Target" "90" }
             "120" { _Set-LssSubnode $deltaruneProfile "LSFG3Mode1" "FIXED"; _Set-LssSubnode $deltaruneProfile "LSFG3Multiplier" "4"; _Set-LssSubnode $deltaruneProfile "LSFG3Target" "120" }
-            "144" { _Set-LssSubnode $deltaruneProfile "LSFG3Mode1" "ADAPTIVE"; _Set-LssSubnode $deltaruneProfile "LSFG3Multiplier" "2"; _Set-LssSubnode $deltaruneProfile "LSFG3Target" "144" }
-            "240" { _Set-LssSubnode $deltaruneProfile "LSFG3Mode1" "ADAPTIVE"; _Set-LssSubnode $deltaruneProfile "LSFG3Multiplier" "2"; _Set-LssSubnode $deltaruneProfile "LSFG3Target" "240" }
+            "144" { _Set-LssSubnode $deltaruneProfile "LSFG3Mode1" "ADAPTIVE"; _Set-LssSubnode $deltaruneProfile "LSFG3Multiplier" "4"; _Set-LssSubnode $deltaruneProfile "LSFG3Target" "144" }
+            "240" { _Set-LssSubnode $deltaruneProfile "LSFG3Mode1" "ADAPTIVE"; _Set-LssSubnode $deltaruneProfile "LSFG3Multiplier" "4"; _Set-LssSubnode $deltaruneProfile "LSFG3Target" "240" }
             default { _Set-LssSubnode $deltaruneProfile "LSFG3Mode1" "FIXED"; _Set-LssSubnode $deltaruneProfile "LSFG3Multiplier" "2"; _Set-LssSubnode $deltaruneProfile "LSFG3Target" "60" }
         }
 
@@ -1425,6 +1425,8 @@ function Start-ModLoader {
     $lastSyncedFps  = Get-LsfgFpsSetting $cfg
     $lastSyncedMode = Get-LsfgModeSetting $cfg
     $lastSyncedFlow = Get-LsfgFlowSetting $cfg
+    $chapterHookTime = $null
+    $chapterHookDone = $true
     try {
         while ($true) {
             $req = Read-Request $cfg
@@ -1441,6 +1443,11 @@ function Start-ModLoader {
                 Set-Ready $cfg
                 # Reset goneCount so chapter transitions (~game_change) have plenty of time without killing the loader
                 $goneCount = 0
+                # Schedule Lossless Scaling hook ~3s after chapter launch
+                if ($req.Chapter -gt 0) {
+                    $chapterHookTime = [DateTime]::UtcNow.AddSeconds(3)
+                    $chapterHookDone = $false
+                }
             }
 
             # In-game profile management (create / delete a profile folder).
@@ -1516,6 +1523,32 @@ function Start-ModLoader {
                 }
                 if (-not (Get-Process -Name "*LosslessScaling*" -ErrorAction SilentlyContinue)) {
                     Start-LosslessScalingIfEnabled $cfg
+                }
+            }
+
+            # Automatically hook Lossless Scaling ~3s after chapter start
+            if (-not $chapterHookDone -and $chapterHookTime -and [DateTime]::UtcNow -ge $chapterHookTime) {
+                $curMode = Get-FramerateModeSetting $cfg
+                if ($curMode -eq 'lossless') {
+                    try {
+                        $deltaruneProcs = @(Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.ProcessName -like '*ELTARUNE*' -and $_.MainWindowHandle -ne 0 })
+                        if ($deltaruneProcs.Count -gt 0) {
+                            if (-not (Get-Process -Name "*LosslessScaling*" -ErrorAction SilentlyContinue)) {
+                                Start-LosslessScalingIfEnabled $cfg
+                                Start-Sleep -Milliseconds 600
+                            }
+                            $wshell = New-Object -ComObject WScript.Shell
+                            $wshell.AppActivate($deltaruneProcs[0].Id)
+                            Start-Sleep -Milliseconds 150
+                            Add-Type -AssemblyName System.Windows.Forms
+                            [System.Windows.Forms.SendKeys]::SendWait("^%{s}")
+                            $chapterHookDone = $true
+                        }
+                    } catch {
+                        $chapterHookDone = $true
+                    }
+                } else {
+                    $chapterHookDone = $true
                 }
             }
 

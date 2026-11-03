@@ -38,9 +38,13 @@
 // ============================================================================
 
 using System;
+using System.IO;
+using System.Collections.Generic;
 using UndertaleModLib;
 using UndertaleModLib.Models;
 using UndertaleModLib.Compiler;
+using UndertaleModLib.Util;
+using ImageMagick;
 
 EnsureDataLoaded();
 
@@ -1284,6 +1288,76 @@ draw_rectangle(_gw - _m - _cs, _gh - _m - _cs, _gw - _m + _cs, _gh - _m + _cs, f
 draw_set_font((global.lang == ""en"") ? 2 : 1);
 draw_set_halign(fa_center);
 
+var _spr_confirm  = asset_get_index(mm_ps ? ""spr_btn_ps4_cross""    : ""spr_btn_xbox_a"");
+var _spr_back     = asset_get_index(mm_ps ? ""spr_btn_ps4_circle""   : ""spr_btn_xbox_b"");
+var _spr_toggle   = asset_get_index(mm_ps ? ""spr_btn_ps4_square""   : ""spr_btn_xbox_x"");
+var _spr_delete   = asset_get_index(mm_ps ? ""spr_btn_ps4_triangle"" : ""spr_btn_xbox_y"");
+var _spr_settings = asset_get_index(mm_ps ? ""spr_btn_ps4_options""  : ""spr_btn_xbox_menu"");
+
+var _draw_bar2 = function(_bx, _by, _k1, _s1, _t1, _k2, _s2, _t2)
+{
+    var _w1 = string_width(_k1) + ((_s1 >= 0) ? (sprite_get_width(_s1) + 4) : 0) + string_width(_t1);
+    var _w2 = string_width(_k2) + ((_s2 >= 0) ? (sprite_get_width(_s2) + 4) : 0) + string_width(_t2);
+    var _gap = 26;
+    var _start = _bx - (_w1 + _gap + _w2) * 0.5;
+    
+    draw_set_halign(fa_left);
+    draw_text(_start, _by, _k1);
+    _start += string_width(_k1);
+    if (_s1 >= 0) {
+        draw_sprite(_s1, 0, _start + 2, _by + 2);
+        _start += sprite_get_width(_s1) + 4;
+    }
+    draw_text(_start, _by, _t1);
+    _start += string_width(_t1) + _gap;
+    
+    draw_text(_start, _by, _k2);
+    _start += string_width(_k2);
+    if (_s2 >= 0) {
+        draw_sprite(_s2, 0, _start + 2, _by + 2);
+        _start += sprite_get_width(_s2) + 4;
+    }
+    draw_text(_start, _by, _t2);
+    draw_set_halign(fa_center);
+};
+
+var _draw_bar3 = function(_bx, _by, _k1, _s1, _t1, _k2, _s2, _t2, _k3, _s3, _t3)
+{
+    var _w1 = string_width(_k1) + ((_s1 >= 0) ? (sprite_get_width(_s1) + 4) : 0) + string_width(_t1);
+    var _w2 = string_width(_k2) + ((_s2 >= 0) ? (sprite_get_width(_s2) + 4) : 0) + string_width(_t2);
+    var _w3 = string_width(_k3) + ((_s3 >= 0) ? (sprite_get_width(_s3) + 4) : 0) + string_width(_t3);
+    var _gap = 18;
+    var _start = _bx - (_w1 + _gap + _w2 + _gap + _w3) * 0.5;
+    
+    draw_set_halign(fa_left);
+    draw_text(_start, _by, _k1);
+    _start += string_width(_k1);
+    if (_s1 >= 0) {
+        draw_sprite(_s1, 0, _start + 2, _by + 2);
+        _start += sprite_get_width(_s1) + 4;
+    }
+    draw_text(_start, _by, _t1);
+    _start += string_width(_t1) + _gap;
+    
+    draw_text(_start, _by, _k2);
+    _start += string_width(_k2);
+    if (_s2 >= 0) {
+        draw_sprite(_s2, 0, _start + 2, _by + 2);
+        _start += sprite_get_width(_s2) + 4;
+    }
+    draw_text(_start, _by, _t2);
+    _start += string_width(_t2) + _gap;
+    
+    draw_text(_start, _by, _k3);
+    _start += string_width(_k3);
+    if (_s3 >= 0) {
+        draw_sprite(_s3, 0, _start + 2, _by + 2);
+        _start += sprite_get_width(_s3) + 4;
+    }
+    draw_text(_start, _by, _t3);
+    draw_set_halign(fa_center);
+};
+
 // === Header: CHAPTER N with flanking rules + yellow diamond accents ===
 var _is_de = (mm_menu_lang == ""de"");
 var _hy = _gh * 0.12;
@@ -1384,7 +1458,7 @@ else if (mm_state == ""settings"")
     draw_text(_cx, _y_curr + 2, _is_de ? ""< Zurueck zum Hauptmenue"" : ""< Back to Main Menu"");
 
     draw_set_color(c_white);
-    draw_text(_cx, _gh * 0.855, _is_de ? (""[Z]/("" + mm_b_confirm + "") Kategorie oeffnen      [X]/("" + mm_b_back + "") Zurueck"") : (""[Z]/("" + mm_b_confirm + "") Open Category      [X]/("" + mm_b_back + "") Back""));
+    _draw_bar2(_cx, _gh * 0.855, ""[Z] "", _spr_confirm, _is_de ? ""Kategorie oeffnen"" : ""Open Category"", ""[X] "", _spr_back, _is_de ? ""Zurueck"" : ""Back"");
 }
 else if (mm_state == ""settings_gfx"")
 {
@@ -1517,9 +1591,9 @@ else if (mm_state == ""settings_gfx"")
     draw_set_color(c_white);
     var _is_toggle_item = (mm_sub_idx == 0) || (_has_lsfg && mm_sub_idx >= 1 && mm_sub_idx <= 3) || (mm_thesi_unlocked && (_has_lsfg ? (mm_sub_idx == 4) : (mm_sub_idx == 1)));
     if (_is_toggle_item)
-        draw_text(_cx, _gh * 0.855, _is_de ? (""[Z]/("" + mm_b_confirm + "") oder [<]/[>] Umschalten      [X]/("" + mm_b_back + "") Zurueck"") : (""[Z]/("" + mm_b_confirm + "") or [<]/[>] Toggle      [X]/("" + mm_b_back + "") Back""));
+        _draw_bar2(_cx, _gh * 0.855, ""[Z] "", _spr_confirm, _is_de ? ""oder [<]/[>] Umschalten"" : ""or [<]/[>] Toggle"", ""[X] "", _spr_back, _is_de ? ""Zurueck"" : ""Back"");
     else
-        draw_text(_cx, _gh * 0.855, _is_de ? (""[Z]/("" + mm_b_confirm + "") Auswaehlen      [X]/("" + mm_b_back + "") Zurueck"") : (""[Z]/("" + mm_b_confirm + "") Select      [X]/("" + mm_b_back + "") Back""));
+        _draw_bar2(_cx, _gh * 0.855, ""[Z] "", _spr_confirm, _is_de ? ""Auswaehlen"" : ""Select"", ""[X] "", _spr_back, _is_de ? ""Zurueck"" : ""Back"");
 }
 else if (mm_state == ""settings_lang"")
 {
@@ -1567,7 +1641,7 @@ else if (mm_state == ""settings_lang"")
     draw_text(_cx, _y2 + 2, _is_de ? ""< Zurueck zu Einstellungen"" : ""< Back to Settings"");
 
     draw_set_color(c_white);
-    draw_text(_cx, _gh * 0.855, _is_de ? (""[Z]/("" + mm_b_confirm + "") oder [<]/[>] Umschalten      [X]/("" + mm_b_back + "") Zurueck"") : (""[Z]/("" + mm_b_confirm + "") or [<]/[>] Toggle      [X]/("" + mm_b_back + "") Back""));
+    _draw_bar2(_cx, _gh * 0.855, ""[Z] "", _spr_confirm, _is_de ? ""oder [<]/[>] Umschalten"" : ""or [<]/[>] Toggle"", ""[X] "", _spr_back, _is_de ? ""Zurueck"" : ""Back"");
 }
 else if (mm_state == ""settings_mods"")
 {
@@ -1641,7 +1715,7 @@ else if (mm_state == ""settings_mods"")
     draw_text(_cx, _y4 + 2, _is_de ? ""< Zurueck zu Einstellungen"" : ""< Back to Settings"");
 
     draw_set_color(c_white);
-    draw_text(_cx, _gh * 0.855, _is_de ? (""[Z]/("" + mm_b_confirm + "") Auswaehlen / Umschalten      [X]/("" + mm_b_back + "") Zurueck"") : (""[Z]/("" + mm_b_confirm + "") Select / Toggle      [X]/("" + mm_b_back + "") Back""));
+    _draw_bar2(_cx, _gh * 0.855, ""[Z] "", _spr_confirm, _is_de ? ""Auswaehlen / Umschalten"" : ""Select / Toggle"", ""[X] "", _spr_back, _is_de ? ""Zurueck"" : ""Back"");
 }
 else if (mm_state == ""modtools_wait"")
 {
@@ -1673,7 +1747,7 @@ else if (mm_state == ""modtools_result"")
     draw_text_transformed(_cx, _gh * 0.54, mm_tools_result3, 0.75, 0.75, 0);
 
     draw_set_color(c_white);
-    draw_text(_cx, _gh * 0.855, _is_de ? (""[Z]/("" + mm_b_confirm + "") oder [X]/("" + mm_b_back + "") Zurueck"") : (""[Z]/("" + mm_b_confirm + "") or [X]/("" + mm_b_back + "") Back""));
+    _draw_bar2(_cx, _gh * 0.855, ""[Z] "", _spr_confirm, _is_de ? ""oder"" : ""or"", ""[X] "", _spr_back, _is_de ? ""Zurueck"" : ""Back"");
 }
 else if (mm_state == ""credits"")
 {
@@ -2035,8 +2109,7 @@ else if (mm_state == ""confirmdelete"")
     draw_set_color(c_red);
     draw_rectangle(_bx - _bw + 2, _by2 - 8, _bx - _bw + 2 + (2 * _bw - 4) * _prog, _by2 + 8, false);
     draw_set_color(c_white);
-
-    draw_text(_cx, _gh * 0.855, _is_de ? (""HALTEN [Z]/("" + mm_b_confirm + "") zum Loeschen (3s)     [X]/("" + mm_b_back + "") Abbrechen"") : (""HOLD [Z]/("" + mm_b_confirm + "") to delete  (3s)     [X]/("" + mm_b_back + "") Cancel""));
+    _draw_bar2(_cx, _gh * 0.855, _is_de ? ""HALTEN [Z] "" : ""HOLD [Z] "", _spr_confirm, _is_de ? ""zum Loeschen (3s)"" : ""to delete (3s)"", ""[X] "", _spr_back, _is_de ? ""Abbrechen"" : ""Cancel"");
 }
 else if (mm_state == ""profilewait"")
 {
@@ -2118,28 +2191,26 @@ else
     }
 
     if (_isprofile && (_sel > 0) && (_sel < _total - 1))
-        draw_text(_cx, _gh * 0.855, _is_de ? (""[Z]/("" + mm_b_confirm + "") Bestaetigen   [Entf]/("" + mm_b_delete + "") Loeschen   [X]/("" + mm_b_back + "") Zurueck"") : (""[Z]/("" + mm_b_confirm + "") Confirm   [Del]/("" + mm_b_delete + "") Delete   [X]/("" + mm_b_back + "") Back""));
+        _draw_bar3(_cx, _gh * 0.855, ""[Z] "", _spr_confirm, _is_de ? ""Bestaetigen"" : ""Confirm"", ""[Entf] "", _spr_delete, _is_de ? ""Loeschen"" : ""Delete"", ""[X] "", _spr_back, _is_de ? ""Zurueck"" : ""Back"");
     else
-        draw_text(_cx, _gh * 0.855, _is_de ? (""[Z]/("" + mm_b_confirm + "") Bestaetigen      [X]/("" + mm_b_back + "") Zurueck"") : (""[Z]/("" + mm_b_confirm + "") Confirm      [X]/("" + mm_b_back + "") Back""));
+        _draw_bar2(_cx, _gh * 0.855, ""[Z] "", _spr_confirm, _is_de ? ""Bestaetigen"" : ""Confirm"", ""[X] "", _spr_back, _is_de ? ""Zurueck"" : ""Back"");
 
     if (!_isprofile)
     {
         var _fps_label = (mm_fps_mode == ""lossless"") ? (""LSFG "" + mm_lsfg_fps + ((mm_lsfg_mode == ""performance"") ? "" Perf"" : """")) : ((mm_fps_mode == ""engine"") ? ""60 FPS"" : ""30 FPS"");
         draw_set_color(c_yellow);
-        if (_is_de)
-        {
-            if (mm_thesi_unlocked)
-                draw_text(_cx, _gh * 0.815, ""[S]/("" + mm_b_settings + "") Einstellungen   |   FPS: ["" + _fps_label + ""]   Thesi: "" + (mm_thesi_overlay ? ""[AN]"" : ""[AUS]"") + ""   Deutsch: "" + (mm_german_patch ? ""[AN]"" : ""[AUS]""));
-            else
-                draw_text(_cx, _gh * 0.815, ""[S]/("" + mm_b_settings + "") Einstellungen   |   FPS: ["" + _fps_label + ""]   Deutsch: "" + (mm_german_patch ? ""[AN]"" : ""[AUS]""));
+        var _foot_tail = _is_de ? ("" Einstellungen   |   FPS: ["" + _fps_label + ""]"" + (mm_thesi_unlocked ? (""   Thesi: "" + (mm_thesi_overlay ? ""[AN]"" : ""[AUS]"")) : """") + ""   Deutsch: "" + (mm_german_patch ? ""[AN]"" : ""[AUS]"")) : ("" Settings   |   FPS: ["" + _fps_label + ""]"" + (mm_thesi_unlocked ? (""   Thesi: "" + (mm_thesi_overlay ? ""[ON]"" : ""[OFF]"")) : """") + ""   German: "" + (mm_german_patch ? ""[ON]"" : ""[OFF]""));
+        var _foot_w = string_width(""[S] "") + ((_spr_settings >= 0) ? (sprite_get_width(_spr_settings) + 4) : 0) + string_width(_foot_tail);
+        var _foot_x = _cx - _foot_w * 0.5;
+        draw_set_halign(fa_left);
+        draw_text(_foot_x, _gh * 0.815, ""[S] "");
+        _foot_x += string_width(""[S] "");
+        if (_spr_settings >= 0) {
+            draw_sprite(_spr_settings, 0, _foot_x + 1, _gh * 0.815 + 2);
+            _foot_x += sprite_get_width(_spr_settings) + 4;
         }
-        else
-        {
-            if (mm_thesi_unlocked)
-                draw_text(_cx, _gh * 0.815, ""[S]/("" + mm_b_settings + "") Settings   |   FPS: ["" + _fps_label + ""]   Thesi: "" + (mm_thesi_overlay ? ""[ON]"" : ""[OFF]"") + ""   German: "" + (mm_german_patch ? ""[ON]"" : ""[OFF]""));
-            else
-                draw_text(_cx, _gh * 0.815, ""[S]/("" + mm_b_settings + "") Settings   |   FPS: ["" + _fps_label + ""]   German: "" + (mm_german_patch ? ""[ON]"" : ""[OFF]""));
-        }
+        draw_text(_foot_x, _gh * 0.815, _foot_tail);
+        draw_set_halign(fa_center);
         draw_set_color(c_white);
     }
 }
@@ -2200,6 +2271,126 @@ UndertaleCode mmStep   = mm.EventHandlerFor(EventType.Step, EventSubtypeStep.Ste
 UndertaleCode mmDraw   = mm.EventHandlerFor(EventType.Draw, EventSubtypeDraw.DrawGUI, Data);
 
 // ----------------------------------------------------------------------------
+//  1.5) Inject controller button sprites into Data if not present
+// ----------------------------------------------------------------------------
+try
+{
+    string[] candidateDirs = new string[] {
+        Path.Combine(Path.GetDirectoryName(ScriptPath), "Buttons"),
+        Path.Combine(Path.GetDirectoryName(ScriptPath), "..", "Patch", "Buttons"),
+        Path.Combine(Path.GetDirectoryName(FilePath), "_tools", "XboxButtons"),
+        Path.Combine(Path.GetDirectoryName(FilePath), "ModLoader", "Buttons"),
+        @"D:\SteamLibrary\steamapps\common\DELTARUNE\_tools\XboxButtons",
+        @"D:\SteamLibrary\steamapps\common\DELTARUNE\Patch\Buttons"
+    };
+
+    string foundDir = null;
+    foreach (var cd in candidateDirs)
+    {
+        if (Directory.Exists(cd) && File.Exists(Path.Combine(cd, "button_xbox_a_0.png")))
+        {
+            foundDir = cd;
+            break;
+        }
+    }
+
+    if (foundDir != null && Data.Sprites.ByName("spr_btn_xbox_a") == null)
+    {
+        var buttonEntries = new (string file, string sprName)[] {
+            ("button_xbox_a_0.png", "spr_btn_xbox_a"),
+            ("button_xbox_b_0.png", "spr_btn_xbox_b"),
+            ("button_xbox_x_0.png", "spr_btn_xbox_x"),
+            ("button_xbox_y_0.png", "spr_btn_xbox_y"),
+            ("button_xbox_left_0.png", "spr_btn_xbox_left"),
+            ("button_xbox_right_0.png", "spr_btn_xbox_right"),
+            ("button_xbox_up_0.png", "spr_btn_xbox_up"),
+            ("button_xbox_down_0.png", "spr_btn_xbox_down"),
+            ("button_xbox_menu_0.png", "spr_btn_xbox_menu"),
+            ("button_ps4_cross_0_0.png", "spr_btn_ps4_cross"),
+            ("button_ps4_circle_0_0.png", "spr_btn_ps4_circle"),
+            ("button_ps4_square_0_0.png", "spr_btn_ps4_square"),
+            ("button_ps4_triangle_0_0.png", "spr_btn_ps4_triangle"),
+            ("button_ps4_options_0.png", "spr_btn_ps4_options")
+        };
+
+        using (var atlas = new MagickImage(MagickColors.Transparent, 128, 64))
+        {
+            int curX = 2;
+            int curY = 2;
+            var items = new List<(string name, int x, int y, int w, int h)>();
+
+            foreach (var b in buttonEntries)
+            {
+                string p = Path.Combine(foundDir, b.file);
+                if (!File.Exists(p)) continue;
+                using (var btnImg = TextureWorker.ReadBGRAImageFromFile(p))
+                {
+                    if (curX + btnImg.Width + 2 > 128)
+                    {
+                        curX = 2;
+                        curY += 18;
+                    }
+                    atlas.Composite(btnImg, curX, curY, CompositeOperator.Over);
+                    items.Add((b.sprName, curX, curY, (int)btnImg.Width, (int)btnImg.Height));
+                    curX += (int)btnImg.Width + 2;
+                }
+            }
+
+            var tex = new UndertaleEmbeddedTexture();
+            tex.Name = Data.Strings.MakeString($"Texture {Data.EmbeddedTextures.Count}");
+            tex.TextureData.Image = GMImage.FromMagickImage(atlas).ConvertToPng();
+            Data.EmbeddedTextures.Add(tex);
+
+            foreach (var item in items)
+            {
+                if (Data.Sprites.ByName(item.name) != null) continue;
+
+                var texItem = new UndertaleTexturePageItem();
+                texItem.Name = Data.Strings.MakeString($"PageItem {Data.TexturePageItems.Count}");
+                texItem.SourceX = (ushort)item.x;
+                texItem.SourceY = (ushort)item.y;
+                texItem.SourceWidth = (ushort)item.w;
+                texItem.SourceHeight = (ushort)item.h;
+                texItem.TargetX = 0;
+                texItem.TargetY = 0;
+                texItem.TargetWidth = (ushort)item.w;
+                texItem.TargetHeight = (ushort)item.h;
+                texItem.BoundingWidth = (ushort)item.w;
+                texItem.BoundingHeight = (ushort)item.h;
+                texItem.TexturePage = tex;
+                Data.TexturePageItems.Add(texItem);
+
+                var spr = new UndertaleSprite();
+                spr.Name = Data.Strings.MakeString(item.name);
+                spr.Width = (uint)item.w;
+                spr.Height = (uint)item.h;
+                spr.MarginLeft = 0;
+                spr.MarginRight = item.w - 1;
+                spr.MarginTop = 0;
+                spr.MarginBottom = item.h - 1;
+                spr.OriginX = 0;
+                spr.OriginY = 0;
+                spr.BBoxMode = 0;
+                spr.SepMasks = UndertaleSprite.SepMaskType.AxisAlignedRect;
+                spr.IsSpecialType = true;
+                spr.SVersion = 3;
+                spr.GMS2PlaybackSpeed = 1;
+                spr.GMS2PlaybackSpeedType = AnimSpeedType.FramesPerGameFrame;
+                var entry = new UndertaleSprite.TextureEntry();
+                entry.Texture = texItem;
+                spr.Textures.Add(entry);
+                Data.Sprites.Add(spr);
+            }
+            Console.WriteLine($"[INFO] Injected {items.Count} controller button sprites into data.win.");
+        }
+    }
+}
+catch (Exception ex)
+{
+    Console.WriteLine($"[WARN] Could not inject button sprites: {ex.Message}");
+}
+
+// ----------------------------------------------------------------------------
 //  2) Compile all GML through one import group.
 //     obj_modmenu already exists in Data.GameObjects, so the HOOK's reference to
 //     it resolves at compile time.
@@ -2233,12 +2424,13 @@ importGroup.QueueFindReplace(uiVersionDraw, VERSION_ANCHOR, VERSION_CREDIT);
 importGroup.Import();
 
 ChangeSelection(mm);
-ScriptMessage(
+Console.WriteLine(
     "Mod menu injected successfully.\n\n" +
     "- obj_modmenu created (Create / Step / Draw GUI)\n" +
     "- show_transition hooked\n" +
     "- input guards added (obj_ui_choice + obj_ui_chapter)\n" +
-    "- title-screen credit added (obj_ui_version)\n\n" +
+    "- title-screen credit added (obj_ui_version)\n" +
+    "- controller button sprites injected (Xbox / PlayStation)\n\n" +
     "Now: File -> Save As -> data_patched.win (do NOT overwrite the original yet).");
 
 
