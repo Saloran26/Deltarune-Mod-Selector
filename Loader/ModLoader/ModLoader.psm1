@@ -250,6 +250,28 @@ function Set-ProfileReady {
     Set-Content (Join-Path $cfg.SignalDir "profile_ready.txt") "ok" -Encoding utf8
 }
 
+function Read-ModToolsCmd {
+    param([Parameter(Mandatory)]$cfg)
+    $p = Join-Path $cfg.SignalDir "mod_tools_cmd.txt"
+    if (-not (Test-Path $p)) { return $null }
+    $line = (Get-Content $p -Raw -Encoding UTF8).Trim()
+    Remove-Item $p -Force
+    return $line
+}
+
+function Set-ModToolsResult {
+    param(
+        [Parameter(Mandatory)]$cfg,
+        [string]$Line1,
+        [string]$Line2 = "",
+        [string]$Line3 = ""
+    )
+    $content = "$Line1`r`n$Line2`r`n$Line3"
+    $utf8 = New-Object System.Text.UTF8Encoding($false)
+    [System.IO.File]::WriteAllText((Join-Path $cfg.SignalDir "mod_tools_result.txt"), $content, $utf8)
+    [System.IO.File]::WriteAllText((Join-Path $cfg.SignalDir "mod_tools_ready.txt"), "ok", $utf8)
+}
+
 function Restore-Vanilla {
     param([Parameter(Mandatory)]$cfg)
     if (-not (Test-Path $cfg.ManifestPath)) {
@@ -299,7 +321,7 @@ function Apply-Mod {
 
 function Clear-Signals {
     param([Parameter(Mandatory)]$cfg)
-    foreach ($n in "mod_request.txt","mod_ready.txt","profile_cmd.txt","profile_ready.txt") {
+    foreach ($n in "mod_request.txt","mod_ready.txt","profile_cmd.txt","profile_ready.txt","mod_tools_cmd.txt","mod_tools_ready.txt","mod_tools_result.txt") {
         $p = Join-Path $cfg.SignalDir $n
         if (Test-Path $p) { Remove-Item $p -Force }
     }
@@ -673,8 +695,8 @@ function Get-SelectorVersion { return $script:SELECTOR_VERSION }
 
 function Compare-SemVer {
     param([string]$A, [string]$B)
-    $pa = @(); foreach ($p in (($A -replace '^[vV]', '').Trim() -split '[.\-+]')) { if ($p -match '^\d+$') { $pa += [int]$p } else { break } }
-    $pb = @(); foreach ($p in (($B -replace '^[vV]', '').Trim() -split '[.\-+]')) { if ($p -match '^\d+$') { $pb += [int]$p } else { break } }
+    $pa = @(); foreach ($p in (($A -replace '^[vV]+', '').Trim() -split '[.\-+]')) { if ($p -match '^\d+$') { $pa += [int]$p } else { break } }
+    $pb = @(); foreach ($p in (($B -replace '^[vV]+', '').Trim() -split '[.\-+]')) { if ($p -match '^\d+$') { $pb += [int]$p } else { break } }
     while ($pa.Count -lt 3) { $pa += 0 }
     while ($pb.Count -lt 3) { $pb += 0 }
     for ($i = 0; $i -lt 3; $i++) {
@@ -885,7 +907,7 @@ function Invoke-UpdateCheck {
 }
 
 function Get-GameBananaModInfo {
-    param([Parameter(Mandatory)][string]$IdOrUrl)
+    param([Parameter(Mandatory)][Alias('ModId')][string]$IdOrUrl)
     $mid = 0
     if ($IdOrUrl -match '(?i)gamebanana\.com/mods/([0-9]+)') {
         $mid = [int]$Matches[1]
@@ -933,11 +955,19 @@ function Get-ModUpdates {
         if ($meta -and $meta.gamebanana_id) {
             $info = Get-GameBananaModInfo $meta.gamebanana_id
             if ($info) {
-                $latestFile = $info.Files | Sort-Object DateAdded -Descending | Select-Object -First 1
+                $targetFile = $null
+                if ($meta.file_name) {
+                    $targetFile = $info.Files | Where-Object { $_.FileName -eq $meta.file_name } | Select-Object -First 1
+                }
+                if (-not $targetFile) {
+                    $targetFile = $info.Files | Sort-Object DateAdded -Descending | Select-Object -First 1
+                }
+
                 $hasUpdate = $false
-                if ($latestFile -and $meta.file_timestamp -and ($latestFile.DateAdded -gt $meta.file_timestamp)) {
+                if ($targetFile -and $meta.file_timestamp -and ($targetFile.DateAdded -gt $meta.file_timestamp)) {
                     $hasUpdate = $true
-                } elseif ($info.Version -and $meta.version -and ($info.Version -ne $meta.version)) {
+                }
+                if ($info.Version -and $meta.version -and ((Compare-SemVer $meta.version $info.Version) -lt 0)) {
                     $hasUpdate = $true
                 }
                 $updates += [pscustomobject]@{
@@ -948,9 +978,9 @@ function Get-ModUpdates {
                     CurrentVersion = if ($meta.version) { $meta.version } else { "?" }
                     NewVersion     = if ($info.Version) { $info.Version } else { "-" }
                     CurrentDate    = if ($meta.file_timestamp) { [DateTimeOffset]::FromUnixTimeSeconds($meta.file_timestamp).LocalDateTime.ToString('dd.MM.yyyy') } else { "-" }
-                    NewDate        = if ($latestFile) { [DateTimeOffset]::FromUnixTimeSeconds($latestFile.DateAdded).LocalDateTime.ToString('dd.MM.yyyy') } else { "-" }
-                    LatestFileName = if ($latestFile) { $latestFile.FileName } else { "-" }
-                    DownloadUrl    = if ($latestFile) { $latestFile.DownloadUrl } else { $null }
+                    NewDate        = if ($targetFile) { [DateTimeOffset]::FromUnixTimeSeconds($targetFile.DateAdded).LocalDateTime.ToString('dd.MM.yyyy') } else { "-" }
+                    LatestFileName = if ($targetFile) { $targetFile.FileName } else { "-" }
+                    DownloadUrl    = if ($targetFile) { $targetFile.DownloadUrl } else { $null }
                     GameBananaId   = $meta.gamebanana_id
                     GameBananaUrl  = $info.Url
                 }
@@ -1113,6 +1143,37 @@ function Start-ModLoader {
                 Set-ProfileReady $cfg
             }
 
+            # In-game mod tools (check updates / process auto-import).
+            $tcmd = Read-ModToolsCmd $cfg
+            if ($tcmd) {
+                if ($tcmd -eq 'check_updates') {
+                    try {
+                        $updates = @(Get-ModUpdates $cfg)
+                        $withUpdates = @($updates | Where-Object { $_.HasUpdate })
+                        $gbCount = @($updates | Where-Object { $_.GameBananaId }).Count
+                        if ($gbCount -eq 0) {
+                            Set-ModToolsResult $cfg "Keine GameBanana-Mods gefunden." "Fuege Mods mit Import-Mod.bat hinzu" "(Option [2] fuer GameBanana-Verknuepfung)"
+                        } elseif ($withUpdates.Count -gt 0) {
+                            $names = ($withUpdates | ForEach-Object { "$($_.ModName) ($($_.NewVersion))" }) -join ", "
+                            Set-ModToolsResult $cfg "$($withUpdates.Count) Mod-Update(s) verfuegbar!" "$names" "Zum Aktualisieren Import-Mod.bat [3] starten."
+                        } else {
+                            Set-ModToolsResult $cfg "Alle $gbCount GameBanana-Mods aktuell!" "Keine neuen Updates vorhanden." "Deine Mods sind auf dem neuesten Stand."
+                        }
+                    } catch {
+                        Set-ModToolsResult $cfg "Fehler beim Update-Check" $_.Exception.Message "Bitte Internetverbindung pruefen."
+                    }
+                } elseif ($tcmd -eq 'auto_import') {
+                    try {
+                        Invoke-AutoImportFolder $cfg
+                        $mods = @(Get-InstalledMods $cfg)
+                        Write-ModList $cfg $mods
+                        Set-ModToolsResult $cfg "Auto-Import durchgefuehrt!" "$($mods.Count) Mods jetzt installiert." "Mod-Liste wurde aktualisiert."
+                    } catch {
+                        Set-ModToolsResult $cfg "Fehler beim Auto-Import" $_.Exception.Message "Pruefe Ordner mods\_import."
+                    }
+                }
+            }
+
             $alive = @(Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.ProcessName -like '*ELTARUNE*' })
             if ($alive.Count -gt 0) { $sawGame = $true; $goneCount = 0 }
             elseif ($sawGame) { $goneCount++ }
@@ -1128,4 +1189,4 @@ function Start-ModLoader {
     }
 }
 
-Export-ModuleMember -Function Get-ModLoaderConfig, Backup-FileIfNeeded, Get-InstalledMods, Write-ModList, Restore-Vanilla, Apply-Mod, Clear-Signals, Read-Request, Set-Ready, Start-ModLoader, Get-ChapterSaveFiles, Write-ProfileList, Get-ProfileDir, Swap-InProfile, Swap-OutProfile, New-Profile, Remove-Profile, Read-ProfileCmd, Set-ProfileReady, Get-SelectorVersion, Compare-SemVer, Test-DataWinPatched, Get-SelectorSettings, Set-SelectorSettings, Get-LatestSelectorRelease, Get-UtmtCli, Invoke-DataWinRepatch, Invoke-SelectorSelfUpdate, Invoke-UpdateCheck, Get-ThesiOverlaySetting, Set-ThesiOverlaySetting, Apply-ThesiOverlay, Get-Fps60PatchSetting, Set-Fps60PatchSetting, Get-GermanPatchSetting, Set-GermanPatchSetting, Get-MenuLangSetting, Set-MenuLangSetting, Apply-ChapterVariant, Get-ModMetadata, Set-ModMetadata, Get-GameBananaModInfo, Get-ModUpdates, Update-DeltaruneMod, Invoke-AutoImportFolder
+Export-ModuleMember -Function Get-ModLoaderConfig, Backup-FileIfNeeded, Get-InstalledMods, Write-ModList, Restore-Vanilla, Apply-Mod, Clear-Signals, Read-Request, Set-Ready, Start-ModLoader, Get-ChapterSaveFiles, Write-ProfileList, Get-ProfileDir, Swap-InProfile, Swap-OutProfile, New-Profile, Remove-Profile, Read-ProfileCmd, Set-ProfileReady, Read-ModToolsCmd, Set-ModToolsResult, Get-SelectorVersion, Compare-SemVer, Test-DataWinPatched, Get-SelectorSettings, Set-SelectorSettings, Get-LatestSelectorRelease, Get-UtmtCli, Invoke-DataWinRepatch, Invoke-SelectorSelfUpdate, Invoke-UpdateCheck, Get-ThesiOverlaySetting, Set-ThesiOverlaySetting, Apply-ThesiOverlay, Get-Fps60PatchSetting, Set-Fps60PatchSetting, Get-GermanPatchSetting, Set-GermanPatchSetting, Get-MenuLangSetting, Set-MenuLangSetting, Apply-ChapterVariant, Get-ModMetadata, Set-ModMetadata, Get-GameBananaModInfo, Get-ModUpdates, Update-DeltaruneMod, Invoke-AutoImportFolder
