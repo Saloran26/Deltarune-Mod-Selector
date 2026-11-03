@@ -509,33 +509,52 @@ else if (mm_state == ""settings"")
     }
 
     var _s_action = button1_p() || keyboard_check_pressed(vk_space) || keyboard_check_pressed(vk_enter);
-    if (_s_action || right_p())
+    var _s_lr = left_p() || right_p();
+    if (_s_action || _s_lr)
     {
-        audio_play_sound(snd_select, 50, 0);
         if (mm_sidx == 0)
         {
-            mm_state = ""settings_gfx"";
-            mm_sub_idx = 0;
+            if (mm_thesi_unlocked)
+            {
+                if (_s_action || right_p())
+                {
+                    audio_play_sound(snd_select, 50, 0);
+                    mm_state = ""settings_gfx"";
+                    mm_sub_idx = 0;
+                }
+            }
+            else
+            {
+                mm_fps60_patch = !mm_fps60_patch;
+                audio_play_sound(snd_select, 50, 0);
+                var _fpf = file_text_open_write(""fps60_patch.txt"");
+                file_text_write_string(_fpf, mm_fps60_patch ? ""1"" : ""0"");
+                file_text_close(_fpf);
+            }
         }
-        else if (mm_sidx == 1)
+        else if (_s_action || right_p())
         {
-            mm_state = ""settings_lang"";
-            mm_sub_idx = 0;
-        }
-        else if (mm_sidx == 2)
-        {
-            mm_state = ""settings_mods"";
-            mm_sub_idx = 0;
-        }
-        else if (mm_sidx == 3)
-        {
-            mm_state = ""credits"";
-            mm_credits_scroll = 0;
-        }
-        else if (mm_sidx == 4)
-        {
-            audio_play_sound(snd_swing, 50, 0);
-            mm_state = ""select"";
+            audio_play_sound(snd_select, 50, 0);
+            if (mm_sidx == 1)
+            {
+                mm_state = ""settings_lang"";
+                mm_sub_idx = 0;
+            }
+            else if (mm_sidx == 2)
+            {
+                mm_state = ""settings_mods"";
+                mm_sub_idx = 0;
+            }
+            else if (mm_sidx == 3)
+            {
+                mm_state = ""credits"";
+                mm_credits_scroll = 0;
+            }
+            else if (mm_sidx == 4)
+            {
+                audio_play_sound(snd_swing, 50, 0);
+                mm_state = ""select"";
+            }
         }
     }
     else if (_cancel)
@@ -593,6 +612,8 @@ else if (mm_state == ""settings_gfx"")
                 file_text_close(_tof_l);
                 mm_load_modlist();
                 mm_sub_idx = 0;
+                mm_sidx = 0;
+                mm_state = ""settings"";
             }
         }
         else if ((mm_thesi_unlocked && mm_sub_idx == 3) || (!mm_thesi_unlocked && mm_sub_idx == 1))
@@ -1078,7 +1099,7 @@ else if (mm_state == ""settings"")
     var _s_y = _gh * 0.23;
     var _s_step = 42;
 
-    // Category 0: Grafik & Performance
+    // Category 0: Grafik & Performance (when Thesi unlocked) OR 60 FPS Overhaul toggle (when locked)
     var _y0 = _s_y;
     if (mm_sidx == 0)
     {
@@ -1087,9 +1108,19 @@ else if (mm_state == ""settings"")
         mm_draw_soul(_cx - _barw + 12, _y0 + 12);
     }
     else draw_set_color(c_white);
-    draw_text(_cx, _y0, _is_de ? ""Grafik & Performance  >"" : ""Graphics & Performance  >"");
-    draw_set_color(c_silver);
-    draw_text_transformed(_cx, _y0 + 18, _is_de ? ""60 FPS, Thesi-Kris & Grafik-Optionen"" : ""60 FPS, Thesi Kris & graphics options"", 0.7, 0.7, 0);
+
+    if (mm_thesi_unlocked)
+    {
+        draw_text(_cx, _y0, _is_de ? ""Grafik & Performance  >"" : ""Graphics & Performance  >"");
+        draw_set_color(c_silver);
+        draw_text_transformed(_cx, _y0 + 18, _is_de ? ""60 FPS, Thesi-Kris & Grafik-Optionen"" : ""60 FPS, Thesi Kris & graphics options"", 0.7, 0.7, 0);
+    }
+    else
+    {
+        draw_text(_cx, _y0, _is_de ? (""60 FPS Overhaul:  "" + (mm_fps60_patch ? ""[AKTIV]"" : ""[AUS]"")) : (""60 FPS Overhaul:  "" + (mm_fps60_patch ? ""[ON]"" : ""[OFF]"")));
+        draw_set_color(mm_fps60_patch ? c_lime : c_dkgray);
+        draw_text_transformed(_cx, _y0 + 18, _is_de ? ""60 FPS Physik- und Frame-Pacing-Anpassungen"" : ""60 FPS physics and frame pacing overhaul"", 0.7, 0.7, 0);
+    }
 
     // Category 1: Sprache & Lokalisierung
     var _y1 = _s_y + _s_step;
@@ -1142,7 +1173,10 @@ else if (mm_state == ""settings"")
     draw_text(_cx, _y4 + 2, _is_de ? ""< Zurueck zum Hauptmenue"" : ""< Back to Main Menu"");
 
     draw_set_color(c_white);
-    draw_text(_cx, _gh * 0.855, _is_de ? (""[Z]/("" + mm_b_confirm + "") Kategorie oeffnen      [X]/("" + mm_b_back + "") Zurueck"") : (""[Z]/("" + mm_b_confirm + "") Open Category      [X]/("" + mm_b_back + "") Back""));
+    if (!mm_thesi_unlocked && mm_sidx == 0)
+        draw_text(_cx, _gh * 0.855, _is_de ? (""[Z]/("" + mm_b_confirm + "") oder [<]/[>] Umschalten      [X]/("" + mm_b_back + "") Zurueck"") : (""[Z]/("" + mm_b_confirm + "") or [<]/[>] Toggle      [X]/("" + mm_b_back + "") Back""));
+    else
+        draw_text(_cx, _gh * 0.855, _is_de ? (""[Z]/("" + mm_b_confirm + "") Kategorie oeffnen      [X]/("" + mm_b_back + "") Zurueck"") : (""[Z]/("" + mm_b_confirm + "") Open Category      [X]/("" + mm_b_back + "") Back""));
 }
 else if (mm_state == ""settings_gfx"")
 {
