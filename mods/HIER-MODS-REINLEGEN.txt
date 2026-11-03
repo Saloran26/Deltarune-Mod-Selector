@@ -1,15 +1,32 @@
-So fügst du einen Mod hinzu
-===========================
+So fuegst du einen Mod hinzu (Deltarune Mod Selector v1.4.0)
+=============================================================
 
-Diesen "mods"-Ordner in deinen Deltarune-Ordner legen (neben DELTARUNE.exe),
-falls er dort noch nicht existiert.
+Es gibt jetzt 3 super einfache Moeglichkeiten, Mods zu installieren:
 
-Fuer jeden Mod hier einen Ordner anlegen. Der ORDNERNAME ist der Name, der
-spaeter im Menue erscheint. Darin die Mod-Dateien GENAU SO verschachtelt
-ablegen, wie sie im Spiel liegen wuerden.
+1. METHODE 1: Per Drag & Drop (Empfohlen)
+-----------------------------------------
+Ziehe eine beliebige Mod-Datei (.zip, .rar, .7z oder .xdelta) einfach per
+Maus direkt auf die Datei "Import-Mod.bat" in deinem Deltarune-Ordner!
+Der Importer entpackt die Dateien, erkennt das Kapitel (1-5) automatisch
+und richtet den Mod komplett spielbereit ein.
 
-Beispiel (ein Kapitel-3-Mod mit gemodeter data.win + Zusatzmusik):
+2. METHODE 2: Direkt von GameBanana installieren
+------------------------------------------------
+Starte "Import-Mod.bat" per Doppelklick und waehle Option [2].
+Gib einfach den GameBanana-Link oder die Mod-ID ein (z. B. https://gamebanana.com/mods/526735).
+Der Importer laedt die Dateien automatisch herunter und prueft kuenftig auch
+auf verfuegbare Updates!
 
+3. METHODE 3: Auto-Import Ordner (mods\_import)
+-----------------------------------------------
+Lege heruntergeladene Mod-Dateien (.zip, .rar, .7z oder .xdelta) einfach in
+den Ordner "mods\_import\".
+Beim naechsten Spielstart (oder ueber "Import-Mod.bat" Option [4]) werden
+alle dortigen Mods automatisch installiert!
+
+4. METHODE 4: Manuell als Ordner anlegen
+----------------------------------------
+Fuer jeden Mod hier einen Ordner anlegen:
   mods\
   └─ Kaizo Knight\
      ├─ chapter3_windows\
@@ -17,7 +34,9 @@ Beispiel (ein Kapitel-3-Mod mit gemodeter data.win + Zusatzmusik):
      └─ mus\
         └─ kaizoknight.ogg
 
-Der Loader erkennt am Unterordner "chapter3_windows" automatisch, dass es ein
-Kapitel-3-Mod ist. Fertig — mehr ist nicht noetig.
-
-(Diese Textdatei kannst du loeschen.)
+MOD-UPDATES PRUEFEN
+===================
+Starte "Import-Mod.bat" und waehle Option [3].
+Der Importer prueft alle installierten Mods auf GameBanana und zeigt dir
+sofort an, ob eine neuere Version verfuegbar ist, die du mit 1 Klick
+aktualisieren kannst!

@@ -51,6 +51,10 @@ function Get-ModLoaderConfig {
         RepoName         = "Deltarune-Mod-Selector"
         PatchMarker      = "SELECT SAVE PROFILE"                                # present iff data.win is patched
         UtmtUrl          = "https://github.com/UnderminersTeam/UndertaleModTool/releases/download/0.9.1.2/UTMT_CLI_v0.9.1.2-Windows.zip"
+        # --- Mod Importer & Update support -----------------------------------
+        ModsImportDir          = Join-Path $GameDir "mods\_import"
+        ModsImportProcessedDir = Join-Path $GameDir "mods\_import\_processed"
+        ModUpdatesPath         = Join-Path $signal "mod_updates.txt"
     }
 }
 
@@ -66,22 +70,49 @@ function Backup-FileIfNeeded {
     return $true
 }
 
+function Get-ModMetadata {
+    param([Parameter(Mandatory)][string]$ModPath)
+    $jsonPath = Join-Path $ModPath "mod.json"
+    if (Test-Path $jsonPath) {
+        try {
+            return (Get-Content -LiteralPath $jsonPath -Raw -Encoding utf8 | ConvertFrom-Json)
+        } catch { return $null }
+    }
+    return $null
+}
+
+function Set-ModMetadata {
+    param([Parameter(Mandatory)][string]$ModPath, [Parameter(Mandatory)]$Metadata)
+    $jsonPath = Join-Path $ModPath "mod.json"
+    $utf8 = New-Object System.Text.UTF8Encoding($false)
+    $json = $Metadata | ConvertTo-Json -Depth 5
+    [System.IO.File]::WriteAllText($jsonPath, $json, $utf8)
+}
+
 function Get-InstalledMods {
     param([Parameter(Mandatory)]$cfg)
     if (-not (Test-Path $cfg.ModsDir)) { return @() }
     $result = @()
     foreach ($dir in Get-ChildItem -LiteralPath $cfg.ModsDir -Directory) {
+        if ($dir.Name.StartsWith('_')) { continue } # skip _import, _processed etc.
         $files = Get-ChildItem -LiteralPath $dir.FullName -Recurse -File
         $rel = @()
         foreach ($f in $files) {
-            $rel += $f.FullName.Substring($dir.FullName.Length).TrimStart('\','/')
+            $r = $f.FullName.Substring($dir.FullName.Length).TrimStart('\','/')
+            if ($r -eq 'mod.json' -or $r -like '*.md' -or ($r -like '*.txt' -and $r -notmatch '(?i)lang')) { continue }
+            $rel += $r
         }
         $chapter = 0
         foreach ($r in $rel) {
             if ($r -match '(?i)(^|[\\/])chapter([0-9]+)_windows[\\/]') { $chapter = [int]$Matches[2]; break }
         }
+        $meta = Get-ModMetadata $dir.FullName
         $result += [pscustomobject]@{
-            Name = $dir.Name; Chapter = $chapter; Path = $dir.FullName; Files = $rel
+            Name     = $dir.Name
+            Chapter  = $chapter
+            Path     = $dir.FullName
+            Files    = $rel
+            Metadata = $meta
         }
     }
     return $result
@@ -853,6 +884,174 @@ function Invoke-UpdateCheck {
     }
 }
 
+function Get-GameBananaModInfo {
+    param([Parameter(Mandatory)][string]$IdOrUrl)
+    $mid = 0
+    if ($IdOrUrl -match '(?i)gamebanana\.com/mods/([0-9]+)') {
+        $mid = [int]$Matches[1]
+    } elseif ($IdOrUrl -match '^[0-9]+$') {
+        $mid = [int]$IdOrUrl
+    } else {
+        throw "Ungueltige GameBanana ID oder URL: '$IdOrUrl'"
+    }
+
+    $url = "https://gamebanana.com/apiv11/Mod/$mid`?_csvProperties=_sName,_sVersion,_aFiles,_tsDateUpdated,_aSubmitter,_sText,_sProfileUrl"
+    $headers = @{ 'User-Agent' = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) DeltaruneModSelector/1.4.0' }
+    try {
+        $res = Invoke-RestMethod -Uri $url -Headers $headers -ErrorAction Stop
+        if (-not $res._sName) { return $null }
+        return [pscustomobject]@{
+            Id          = $mid
+            Name        = $res._sName
+            Version     = $res._sVersion
+            DateUpdated = [int64]$res._tsDateUpdated
+            Author      = $res._aSubmitter._sName
+            Url         = if ($res._sProfileUrl) { $res._sProfileUrl } else { "https://gamebanana.com/mods/$mid" }
+            Files       = @($res._aFiles | ForEach-Object {
+                [pscustomobject]@{
+                    FileId      = $_._idRow
+                    FileName    = $_._sFile
+                    DownloadUrl = $_._sDownloadUrl
+                    FileSize    = [int64]$_._nFilesize
+                    DateAdded   = [int64]$_._tsDateAdded
+                    Description = $_._sDescription
+                }
+            })
+        }
+    } catch {
+        Write-Warning "Fehler beim Abrufen von GameBanana Mod ${mid}: $($_.Exception.Message)"
+        return $null
+    }
+}
+
+function Get-ModUpdates {
+    param([Parameter(Mandatory)]$cfg)
+    $installed = Get-InstalledMods $cfg
+    $updates = @()
+    foreach ($mod in $installed) {
+        $meta = $mod.Metadata
+        if ($meta -and $meta.gamebanana_id) {
+            $info = Get-GameBananaModInfo $meta.gamebanana_id
+            if ($info) {
+                $latestFile = $info.Files | Sort-Object DateAdded -Descending | Select-Object -First 1
+                $hasUpdate = $false
+                if ($latestFile -and $meta.file_timestamp -and ($latestFile.DateAdded -gt $meta.file_timestamp)) {
+                    $hasUpdate = $true
+                } elseif ($info.Version -and $meta.version -and ($info.Version -ne $meta.version)) {
+                    $hasUpdate = $true
+                }
+                $updates += [pscustomobject]@{
+                    ModName        = $mod.Name
+                    Chapter        = $mod.Chapter
+                    Path           = $mod.Path
+                    HasUpdate      = $hasUpdate
+                    CurrentVersion = if ($meta.version) { $meta.version } else { "?" }
+                    NewVersion     = if ($info.Version) { $info.Version } else { "-" }
+                    CurrentDate    = if ($meta.file_timestamp) { [DateTimeOffset]::FromUnixTimeSeconds($meta.file_timestamp).LocalDateTime.ToString('dd.MM.yyyy') } else { "-" }
+                    NewDate        = if ($latestFile) { [DateTimeOffset]::FromUnixTimeSeconds($latestFile.DateAdded).LocalDateTime.ToString('dd.MM.yyyy') } else { "-" }
+                    LatestFileName = if ($latestFile) { $latestFile.FileName } else { "-" }
+                    DownloadUrl    = if ($latestFile) { $latestFile.DownloadUrl } else { $null }
+                    GameBananaId   = $meta.gamebanana_id
+                    GameBananaUrl  = $info.Url
+                }
+            }
+        } else {
+            $updates += [pscustomobject]@{
+                ModName        = $mod.Name
+                Chapter        = $mod.Chapter
+                Path           = $mod.Path
+                HasUpdate      = $false
+                CurrentVersion = "-"
+                NewVersion     = "-"
+                CurrentDate    = "-"
+                NewDate        = "-"
+                LatestFileName = "-"
+                DownloadUrl    = $null
+                GameBananaId   = $null
+                GameBananaUrl  = $null
+            }
+        }
+    }
+    return $updates
+}
+
+function Update-DeltaruneMod {
+    param(
+        [Parameter(Mandatory)]$cfg,
+        [Parameter(Mandatory)][string]$ModName
+    )
+    $modDir = Join-Path $cfg.ModsDir $ModName
+    if (-not (Test-Path $modDir)) {
+        throw "Mod-Ordner '$ModName' existiert nicht!"
+    }
+    $meta = Get-ModMetadata $modDir
+    if (-not $meta -or -not $meta.gamebanana_id) {
+        throw "Mod '$ModName' hat keine verknuepfte GameBanana ID in mod.json!"
+    }
+    $info = Get-GameBananaModInfo $meta.gamebanana_id
+    if (-not $info) {
+        throw "Konnte Mod-Informationen fuer ID $($meta.gamebanana_id) nicht von GameBanana abrufen."
+    }
+    $latestFile = $info.Files | Sort-Object DateAdded -Descending | Select-Object -First 1
+    if (-not $latestFile) {
+        throw "Keine Downloaddateien auf GameBanana gefunden."
+    }
+
+    # Backup des bisherigen Mod-Ordners
+    $backupDir = Join-Path $cfg.GameDir "_mod_backups"
+    if (-not (Test-Path $backupDir)) { New-Item -ItemType Directory -Path $backupDir -Force | Out-Null }
+    $stamp = Get-Date -Format "yyyyMMdd_HHmmss"
+    $modBackup = Join-Path $backupDir "${ModName}_bak_${stamp}"
+    Copy-Item -LiteralPath $modDir -Destination $modBackup -Recurse -Force
+
+    # Herunterladen und Ausfuehren ueber Import-Mod.ps1
+    $importerPs1 = Join-Path $cfg.GameDir "Import-Mod.ps1"
+    if (-not (Test-Path $importerPs1)) {
+        $importerPs1 = Join-Path (Split-Path $cfg.GameDir) "Import-Mod.ps1"
+    }
+    if (Test-Path $importerPs1) {
+        & powershell -NoProfile -ExecutionPolicy Bypass -File $importerPs1 -Source "https://gamebanana.com/mods/$($meta.gamebanana_id)" -ModName $ModName -Force
+    }
+
+    # Caches fuer diesen Mod zuruecksetzen
+    $modKey = $ModName -replace '[^a-zA-Z0-9_-]', '_'
+    Get-ChildItem -Path $cfg.ThesiCacheDir, $cfg.GermanCacheDir -Filter "${modKey}_*" -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force
+}
+
+function Invoke-AutoImportFolder {
+    param([Parameter(Mandatory)]$cfg)
+    $importDir = $cfg.ModsImportDir
+    if (-not (Test-Path $importDir)) {
+        New-Item -ItemType Directory -Path $importDir -Force | Out-Null
+        $readme = "Lege hier heruntergeladene Mod-Dateien (.zip, .rar, .7z oder .xdelta) ab.`nDer Mod-Loader importiert sie beim Spielstart automatisch in deinen 'mods'-Ordner!"
+        $utf8 = New-Object System.Text.UTF8Encoding($false)
+        [System.IO.File]::WriteAllText((Join-Path $importDir "HIER_MOD_DATEIEN_ABLEGEN.txt"), $readme, $utf8)
+        return
+    }
+
+    $files = Get-ChildItem -LiteralPath $importDir -File | Where-Object {
+        $_.Extension -match '(?i)^\.(zip|rar|7z|xdelta)$'
+    }
+    if ($files.Count -eq 0) { return }
+
+    $importerPs1 = Join-Path $cfg.GameDir "Import-Mod.ps1"
+    $procDir = $cfg.ModsImportProcessedDir
+    if (-not (Test-Path $procDir)) { New-Item -ItemType Directory -Path $procDir -Force | Out-Null }
+
+    foreach ($f in $files) {
+        try {
+            if (Test-Path $importerPs1) {
+                & powershell -NoProfile -ExecutionPolicy Bypass -File $importerPs1 -Source $f.FullName -Force
+                $dest = Join-Path $procDir $f.Name
+                if (Test-Path $dest) { Remove-Item $dest -Force }
+                Move-Item -LiteralPath $f.FullName -Destination $dest -Force
+            }
+        } catch {
+            try { Add-Content -LiteralPath (Join-Path $cfg.SignalDir 'loader_error.txt') -Value ("Auto-Import '$($f.Name)': " + $_.Exception.Message) -Encoding utf8 } catch {}
+        }
+    }
+}
+
 function Start-ModLoader {
     param(
         [Parameter(Mandatory)][string]$GameDir,
@@ -865,6 +1064,7 @@ function Start-ModLoader {
     # progress and restore the user's real saves BEFORE anything else touches them.
     Swap-OutProfile $cfg
     Restore-Vanilla $cfg
+    Invoke-AutoImportFolder $cfg
     Write-ModList $cfg (@(Get-InstalledMods $cfg))
     Write-ProfileList $cfg
     if ([string]::IsNullOrWhiteSpace($GameExe)) { return }
@@ -928,4 +1128,4 @@ function Start-ModLoader {
     }
 }
 
-Export-ModuleMember -Function Get-ModLoaderConfig, Backup-FileIfNeeded, Get-InstalledMods, Write-ModList, Restore-Vanilla, Apply-Mod, Clear-Signals, Read-Request, Set-Ready, Start-ModLoader, Get-ChapterSaveFiles, Write-ProfileList, Get-ProfileDir, Swap-InProfile, Swap-OutProfile, New-Profile, Remove-Profile, Read-ProfileCmd, Set-ProfileReady, Get-SelectorVersion, Compare-SemVer, Test-DataWinPatched, Get-SelectorSettings, Set-SelectorSettings, Get-LatestSelectorRelease, Get-UtmtCli, Invoke-DataWinRepatch, Invoke-SelectorSelfUpdate, Invoke-UpdateCheck, Get-ThesiOverlaySetting, Set-ThesiOverlaySetting, Apply-ThesiOverlay, Get-Fps60PatchSetting, Set-Fps60PatchSetting, Get-GermanPatchSetting, Set-GermanPatchSetting, Get-MenuLangSetting, Set-MenuLangSetting, Apply-ChapterVariant
+Export-ModuleMember -Function Get-ModLoaderConfig, Backup-FileIfNeeded, Get-InstalledMods, Write-ModList, Restore-Vanilla, Apply-Mod, Clear-Signals, Read-Request, Set-Ready, Start-ModLoader, Get-ChapterSaveFiles, Write-ProfileList, Get-ProfileDir, Swap-InProfile, Swap-OutProfile, New-Profile, Remove-Profile, Read-ProfileCmd, Set-ProfileReady, Get-SelectorVersion, Compare-SemVer, Test-DataWinPatched, Get-SelectorSettings, Set-SelectorSettings, Get-LatestSelectorRelease, Get-UtmtCli, Invoke-DataWinRepatch, Invoke-SelectorSelfUpdate, Invoke-UpdateCheck, Get-ThesiOverlaySetting, Set-ThesiOverlaySetting, Apply-ThesiOverlay, Get-Fps60PatchSetting, Set-Fps60PatchSetting, Get-GermanPatchSetting, Set-GermanPatchSetting, Get-MenuLangSetting, Set-MenuLangSetting, Apply-ChapterVariant, Get-ModMetadata, Set-ModMetadata, Get-GameBananaModInfo, Get-ModUpdates, Update-DeltaruneMod, Invoke-AutoImportFolder
