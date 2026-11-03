@@ -602,7 +602,7 @@ function Set-LosslessScalingProfile {
     _Set-LssSubnode $deltaruneProfile "AutoScaleDelay" "2"
     _Set-LssSubnode $deltaruneProfile "ScalingType" "Off"
     _Set-LssSubnode $deltaruneProfile "FrameGeneration" "LSFG3"
-    _Set-LssSubnode $deltaruneProfile "LSFGSize" "QUALITY"
+    _Set-LssSubnode $deltaruneProfile "LSFGSize" "BALANCED"
     _Set-LssSubnode $deltaruneProfile "SyncMode" "VSYNC1"
     _Set-LssSubnode $deltaruneProfile "CaptureApi" "DXGI"
     _Set-LssSubnode $deltaruneProfile "DrawFps" "false"
