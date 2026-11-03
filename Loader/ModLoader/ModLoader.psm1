@@ -1,6 +1,6 @@
 # Installed Mod-Selector version. The self-updater compares this against the
 # latest GitHub release tag. Bump it whenever the shipped files change.
-$script:SELECTOR_VERSION = '1.4.0'
+$script:SELECTOR_VERSION = '1.5.0'
 
 function Get-ModLoaderConfig {
     param([Parameter(Mandatory)][string]$GameDir)
@@ -27,8 +27,11 @@ function Get-ModLoaderConfig {
         ThesiOverlayPath = Join-Path $signal "thesi_overlay.txt"   # "1"/"0"; toggled in settings menu
         ThesiCacheDir    = Join-Path $GameDir "_thesicache"        # cached patched mods for instant loading
         ThesiSpritesDir  = Join-Path (Join-Path $GameDir "_tools") "ThesiSprites"
-        # --- 60 FPS Overhaul Patch support -----------------------------------
-        Fps60PatchPath   = Join-Path $signal "fps60_patch.txt"     # "1"/"0"; toggled in settings menu
+        # --- 60 FPS Overhaul & Framerate Mode support ------------------------
+        Fps60PatchPath   = Join-Path $signal "fps60_patch.txt"     # legacy "1"/"0"; synced with fps_mode.txt
+        FramerateModePath= Join-Path $signal "fps_mode.txt"        # "lossless"/"engine"/"off"
+        LsfgFpsPath      = Join-Path $signal "lsfg_fps.txt"        # "60"/"90"/"120"/"144"/"240"
+        LssPromptedPath  = Join-Path $signal "lss_prompted.txt"    # "1" once first-run question has been answered
         Fps60CacheDir    = Join-Path $GameDir "_fpscache"          # pre-patched 60 FPS data for instant loading
         Fps60PatchesDir  = Join-Path (Join-Path $GameDir "_tools") "60fps_patches"
         # --- German Translation Patch support --------------------------------
@@ -438,18 +441,258 @@ function Apply-ThesiOverlay {
     }
 }
 
+function Get-FramerateModeSetting {
+    param([Parameter(Mandatory)]$cfg)
+    if (Test-Path $cfg.FramerateModePath) {
+        try {
+            $val = (Get-Content -LiteralPath $cfg.FramerateModePath -Raw).Trim().ToLower()
+            if ($val -in @('lossless', 'engine', 'off')) { return $val }
+        } catch {}
+    }
+    # Fallback to legacy fps60_patch.txt
+    if (Test-Path $cfg.Fps60PatchPath) {
+        try {
+            if ((Get-Content -LiteralPath $cfg.Fps60PatchPath -Raw).Trim() -eq '1') {
+                return 'engine'
+            }
+        } catch {}
+    }
+    return 'off'
+}
+
+function Set-FramerateModeSetting {
+    param([Parameter(Mandatory)]$cfg, [string]$Mode = 'off')
+    $Mode = $Mode.ToLower()
+    if ($Mode -notin @('lossless', 'engine', 'off')) { $Mode = 'off' }
+    $utf8 = New-Object System.Text.UTF8Encoding($false)
+    try { [System.IO.File]::WriteAllText($cfg.FramerateModePath, $Mode, $utf8) } catch {}
+    # Keep legacy fps60_patch.txt in sync
+    try { [System.IO.File]::WriteAllText($cfg.Fps60PatchPath, ($(if ($Mode -eq 'engine') { '1' } else { '0' })), $utf8) } catch {}
+}
+
+function Get-LsfgFpsSetting {
+    param([Parameter(Mandatory)]$cfg)
+    if (Test-Path $cfg.LsfgFpsPath) {
+        try {
+            $val = (Get-Content -LiteralPath $cfg.LsfgFpsPath -Raw).Trim()
+            if ($val -in @('60', '90', '120', '144', '240')) { return $val }
+        } catch {}
+    }
+    return '60'
+}
+
+function Set-LsfgFpsSetting {
+    param([Parameter(Mandatory)]$cfg, [string]$Fps = '60')
+    if ($Fps -notin @('60', '90', '120', '144', '240')) { $Fps = '60' }
+    $utf8 = New-Object System.Text.UTF8Encoding($false)
+    try { [System.IO.File]::WriteAllText($cfg.LsfgFpsPath, $Fps, $utf8) } catch {}
+}
+
 function Get-Fps60PatchSetting {
     param([Parameter(Mandatory)]$cfg)
-    if (-not (Test-Path $cfg.Fps60PatchPath)) { return $false }
-    try {
-        return ((Get-Content -LiteralPath $cfg.Fps60PatchPath -Raw).Trim() -eq '1')
-    } catch { return $false }
+    return (Get-FramerateModeSetting $cfg) -eq 'engine'
 }
 
 function Set-Fps60PatchSetting {
     param([Parameter(Mandatory)]$cfg, [bool]$Enabled)
-    $utf8 = New-Object System.Text.UTF8Encoding($false)
-    try { [System.IO.File]::WriteAllText($cfg.Fps60PatchPath, ($(if ($Enabled) { '1' } else { '0' })), $utf8) } catch {}
+    Set-FramerateModeSetting $cfg -Mode ($(if ($Enabled) { 'engine' } else { 'off' }))
+}
+
+function Find-LosslessScalingExe {
+    param($cfg = $null)
+    # 1. Check running process
+    $p = Get-Process -Name "*LosslessScaling*" -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($p -and $p.Path -and (Test-Path $p.Path)) { return $p.Path }
+
+    # 2. Check well-known default Steam locations
+    $candidates = @(
+        "C:\Program Files (x86)\Steam\steamapps\common\Lossless Scaling\LosslessScaling.exe",
+        "C:\Program Files\Steam\steamapps\common\Lossless Scaling\LosslessScaling.exe"
+    )
+    if ($cfg -and $cfg.ToolsDir) {
+        $candidates += Join-Path $cfg.ToolsDir "Lossless Scaling\LosslessScaling.exe"
+    }
+    foreach ($c in $candidates) {
+        if (Test-Path $c) { return $c }
+    }
+
+    # 3. Parse Steam libraryfolders.vdf
+    $vdfPaths = @(
+        "C:\Program Files (x86)\Steam\steamapps\libraryfolders.vdf",
+        "C:\Program Files\Steam\steamapps\libraryfolders.vdf"
+    )
+    foreach ($vdf in $vdfPaths) {
+        if (Test-Path $vdf) {
+            try {
+                $content = Get-Content -LiteralPath $vdf -Raw -ErrorAction SilentlyContinue
+                $matches = [regex]::Matches($content, '"path"\s+"([^"]+)"')
+                foreach ($m in $matches) {
+                    $lib = $m.Groups[1].Value.Replace('\\', '\')
+                    $candidate = Join-Path $lib "steamapps\common\Lossless Scaling\LosslessScaling.exe"
+                    if (Test-Path $candidate) { return $candidate }
+                }
+            } catch {}
+        }
+    }
+    return $null
+}
+
+function Set-LosslessScalingProfile {
+    param(
+        [Parameter(Mandatory)]$cfg,
+        [string]$TargetFps = $null
+    )
+    if (-not $TargetFps) {
+        $TargetFps = Get-LsfgFpsSetting $cfg
+    }
+
+    $lssDir = Join-Path $env:LOCALAPPDATA "Lossless Scaling"
+    if (-not (Test-Path $lssDir)) { New-Item -ItemType Directory -Path $lssDir -Force | Out-Null }
+    $lssConfig = Join-Path $lssDir "Settings.xml"
+    if (Test-Path $lssConfig) {
+        try {
+            [xml]$xml = Get-Content -LiteralPath $lssConfig -Raw
+        } catch {
+            $xml = $null
+        }
+    }
+    if (-not $xml -or -not $xml.Settings) {
+        [xml]$xml = @"
+<?xml version="1.0" encoding="utf-8"?>
+<Settings xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <MinimizeToTray>true</MinimizeToTray>
+  <CloseToTray>true</CloseToTray>
+  <GameProfiles />
+</Settings>
+"@
+    }
+
+    $settingsNode = $xml.Settings
+    if (-not $settingsNode.MinimizeToTray) {
+        $n = $xml.CreateElement("MinimizeToTray"); $n.InnerText = "true"; [void]$settingsNode.AppendChild($n)
+    } else { $settingsNode.MinimizeToTray = "true" }
+    if (-not $settingsNode.CloseToTray) {
+        $n = $xml.CreateElement("CloseToTray"); $n.InnerText = "true"; [void]$settingsNode.AppendChild($n)
+    } else { $settingsNode.CloseToTray = "true" }
+
+    $profilesNode = $settingsNode.GameProfiles
+    if (-not $profilesNode) {
+        $profilesNode = $xml.CreateElement("GameProfiles")
+        [void]$settingsNode.AppendChild($profilesNode)
+    }
+
+    $deltaruneProfile = $profilesNode.Profile | Where-Object { $_.Title -eq "DELTARUNE" -or $_.Filter -eq "DELTARUNE.exe" } | Select-Object -First 1
+    if (-not $deltaruneProfile) {
+        $deltaruneProfile = $xml.CreateElement("Profile")
+        [void]$profilesNode.AppendChild($deltaruneProfile)
+    }
+
+    function _Set-LssSubnode([System.Xml.XmlElement]$parent, [string]$name, [string]$val) {
+        $sub = $parent[$name]
+        if (-not $sub) {
+            $sub = $parent.OwnerDocument.CreateElement($name)
+            [void]$parent.AppendChild($sub)
+        }
+        $sub.InnerText = $val
+    }
+
+    _Set-LssSubnode $deltaruneProfile "Title" "DELTARUNE"
+    _Set-LssSubnode $deltaruneProfile "Filter" "DELTARUNE.exe"
+    _Set-LssSubnode $deltaruneProfile "AutoScale" "true"
+    _Set-LssSubnode $deltaruneProfile "AutoScaleDelay" "2"
+    _Set-LssSubnode $deltaruneProfile "ScalingType" "Off"
+    _Set-LssSubnode $deltaruneProfile "FrameGeneration" "LSFG3"
+    _Set-LssSubnode $deltaruneProfile "LSFGSize" "QUALITY"
+    _Set-LssSubnode $deltaruneProfile "SyncMode" "VSYNC1"
+    _Set-LssSubnode $deltaruneProfile "CaptureApi" "DXGI"
+    _Set-LssSubnode $deltaruneProfile "DrawFps" "false"
+
+    switch ($TargetFps) {
+        "60"  { _Set-LssSubnode $deltaruneProfile "LSFG3Mode1" "FIXED"; _Set-LssSubnode $deltaruneProfile "LSFG3Multiplier" "2"; _Set-LssSubnode $deltaruneProfile "LSFG3Target" "60" }
+        "90"  { _Set-LssSubnode $deltaruneProfile "LSFG3Mode1" "FIXED"; _Set-LssSubnode $deltaruneProfile "LSFG3Multiplier" "3"; _Set-LssSubnode $deltaruneProfile "LSFG3Target" "90" }
+        "120" { _Set-LssSubnode $deltaruneProfile "LSFG3Mode1" "FIXED"; _Set-LssSubnode $deltaruneProfile "LSFG3Multiplier" "4"; _Set-LssSubnode $deltaruneProfile "LSFG3Target" "120" }
+        "144" { _Set-LssSubnode $deltaruneProfile "LSFG3Mode1" "ADAPTIVE"; _Set-LssSubnode $deltaruneProfile "LSFG3Multiplier" "2"; _Set-LssSubnode $deltaruneProfile "LSFG3Target" "144" }
+        "240" { _Set-LssSubnode $deltaruneProfile "LSFG3Mode1" "ADAPTIVE"; _Set-LssSubnode $deltaruneProfile "LSFG3Multiplier" "2"; _Set-LssSubnode $deltaruneProfile "LSFG3Target" "240" }
+        default { _Set-LssSubnode $deltaruneProfile "LSFG3Mode1" "FIXED"; _Set-LssSubnode $deltaruneProfile "LSFG3Multiplier" "2"; _Set-LssSubnode $deltaruneProfile "LSFG3Target" "60" }
+    }
+
+    $xml.Save($lssConfig)
+}
+
+$script:StartedLosslessScaling = $false
+
+function Start-LosslessScalingIfEnabled {
+    param([Parameter(Mandatory)]$cfg)
+    $mode = Get-FramerateModeSetting $cfg
+    if ($mode -ne 'lossless') { return }
+
+    $lssExe = Find-LosslessScalingExe $cfg
+    if (-not $lssExe) { return }
+
+    Set-LosslessScalingProfile $cfg
+
+    $running = Get-Process -Name "*LosslessScaling*" -ErrorAction SilentlyContinue | Select-Object -First 1
+    if (-not $running) {
+        try {
+            $null = Start-Process -FilePath $lssExe -WindowStyle Minimized -PassThru
+            $script:StartedLosslessScaling = $true
+        } catch {}
+    }
+}
+
+function Stop-LosslessScalingIfStarted {
+    if ($script:StartedLosslessScaling) {
+        try {
+            Get-Process -Name "*LosslessScaling*" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+        } catch {}
+        $script:StartedLosslessScaling = $false
+    }
+}
+
+function Invoke-LosslessScalingFirstRunCheck {
+    param([Parameter(Mandatory)]$cfg)
+    if (Test-Path $cfg.LssPromptedPath) { return }
+
+    if (-not [Environment]::UserInteractive) {
+        try { Set-Content -LiteralPath $cfg.LssPromptedPath -Value "1" -Encoding utf8 } catch {}
+        return
+    }
+
+    try {
+        Add-Type -AssemblyName System.Windows.Forms
+        $promptMsg = "Moechtest du Lossless Scaling (LSFG) fuer fluessige 60, 120 oder 240 FPS auf allen Mods nutzen?`n`nFalls du Lossless Scaling auf Steam besitzt, richtet der ModLoader es vollautomatisch und headless im Hintergrund ein.`n`n(Diese Frage erscheint nur einmal beim ersten Start. Du kannst die Erkennung jederzeit im In-Game-Menue unter 'Mod-Verwaltung' starten.)"
+        $res = [System.Windows.Forms.MessageBox]::Show(
+            $promptMsg,
+            "Deltarune Mod-Selector - Lossless Scaling",
+            [System.Windows.Forms.MessageBoxButtons]::YesNo,
+            [System.Windows.Forms.MessageBoxIcon]::Question
+        )
+
+        if ($res -eq [System.Windows.Forms.DialogResult]::Yes) {
+            $lssExe = Find-LosslessScalingExe $cfg
+            if ($lssExe) {
+                Set-LosslessScalingProfile $cfg -TargetFps "60"
+                Set-FramerateModeSetting $cfg -Mode "lossless"
+                Set-LsfgFpsSetting $cfg -Fps "60"
+                [System.Windows.Forms.MessageBox]::Show(
+                    "Lossless Scaling wurde erfolgreich erkannt und fuer DELTARUNE eingerichtet!`n`nIm Spiel laeuft die Zwischenbildberechnung nun automatisch mit maximaler Bildqualitaet (LSFG 2.3 Quality). Du kannst die Ziel-FPS (bis zu 240 FPS) jederzeit im Spielmenue anpassen.",
+                    "Lossless Scaling eingerichtet",
+                    [System.Windows.Forms.MessageBoxButtons]::OK,
+                    [System.Windows.Forms.MessageBoxIcon]::Information
+                )
+            } else {
+                [System.Windows.Forms.MessageBox]::Show(
+                    "Lossless Scaling wurde in deiner Steam-Bibliothek noch nicht gefunden.`n`nSobald du es auf Steam besitzt, kannst du es im In-Game-Menue unter 'Mod-Verwaltung & Updates' jederzeit automatisch einrichten lassen.",
+                    "Lossless Scaling nicht gefunden",
+                    [System.Windows.Forms.MessageBoxButtons]::OK,
+                    [System.Windows.Forms.MessageBoxIcon]::Information
+                )
+            }
+        }
+    } catch {}
+    finally {
+        try { Set-Content -LiteralPath $cfg.LssPromptedPath -Value "1" -Encoding utf8 } catch {}
+    }
 }
 
 function Get-GermanPatchSetting {
@@ -491,7 +734,8 @@ function Apply-ChapterVariant {
     Restore-Vanilla $cfg
     if ($Chapter -le 0) { return }
 
-    $fps60Active = Get-Fps60PatchSetting $cfg
+    $framerateMode = Get-FramerateModeSetting $cfg
+    $fps60Active = ($framerateMode -eq 'engine')
     $thesiActive = Get-ThesiOverlaySetting $cfg
     $germanActive = Get-GermanPatchSetting $cfg
 
@@ -523,6 +767,20 @@ function Apply-ChapterVariant {
             }
             elseif (-not $germanActive -and $thesiActive) {
                 Apply-ThesiOverlay $cfg $Chapter $mod
+            }
+
+            # Optional Chapter 1 German translation for custom mods that don't supply custom text
+            if ($germanActive -and $Chapter -eq 1) {
+                $targetLang = Join-Path (Join-Path (Join-Path $cfg.GameDir $chFolder) "lang") "lang_en.json"
+                $modLang = Join-Path (Join-Path $mod.Path $chFolder) "lang\lang_en.json"
+                if (-not (Test-Path $modLang)) {
+                    $gLang = Join-Path (Join-Path (Join-Path $cfg.GermanCacheDir "chapter1_windows") "lang") "lang_en.json"
+                    if (Test-Path $gLang) {
+                        $targetLangDir = Split-Path $targetLang -Parent
+                        if (-not (Test-Path $targetLangDir)) { New-Item -ItemType Directory -Path $targetLangDir -Force | Out-Null }
+                        Copy-Item -LiteralPath $gLang -Destination $targetLang -Force
+                    }
+                }
             }
         }
         return
@@ -1103,6 +1361,10 @@ function Start-ModLoader {
     # DELTARUNE update reverted data.win. Best-effort; never blocks the launch.
     Invoke-UpdateCheck $cfg
 
+    # First-run prompt & startup for Lossless Scaling
+    Invoke-LosslessScalingFirstRunCheck $cfg
+    Start-LosslessScalingIfEnabled $cfg
+
     $startParams = @{ FilePath = $GameExe; WorkingDirectory = $GameDir; PassThru = $true }
     if ($GameArgs -and $GameArgs.Count -gt 0) { $startParams.ArgumentList = $GameArgs }
     $null = Start-Process @startParams
@@ -1114,6 +1376,7 @@ function Start-ModLoader {
     # Kapitelwechsel und bedient auch weitere Mod-Anfragen.
     $sawGame = $false
     $goneCount = 0
+    $lastSyncedFps = Get-LsfgFpsSetting $cfg
     try {
         while ($true) {
             $req = Read-Request $cfg
@@ -1143,7 +1406,7 @@ function Start-ModLoader {
                 Set-ProfileReady $cfg
             }
 
-            # In-game mod tools (check updates / process auto-import).
+            # In-game mod tools (check updates / process auto-import / scan lossless scaling).
             $tcmd = Read-ModToolsCmd $cfg
             if ($tcmd) {
                 if ($tcmd -eq 'check_updates') {
@@ -1171,6 +1434,33 @@ function Start-ModLoader {
                     } catch {
                         Set-ModToolsResult $cfg "Fehler beim Auto-Import" $_.Exception.Message "Pruefe Ordner mods\_import."
                     }
+                } elseif ($tcmd -eq 'scan_lss') {
+                    try {
+                        $lssExe = Find-LosslessScalingExe $cfg
+                        if ($lssExe) {
+                            Set-LosslessScalingProfile $cfg
+                            Set-FramerateModeSetting $cfg -Mode 'lossless'
+                            Start-LosslessScalingIfEnabled $cfg
+                            Set-ModToolsResult $cfg "Lossless Scaling eingerichtet!" "Profil 'DELTARUNE' (LSFG 2.3 Quality) aktiv." "Framerate-Modus: [Lossless Scaling] aktiviert."
+                        } else {
+                            Set-ModToolsResult $cfg "Lossless Scaling nicht gefunden!" "Bitte ueber Steam installieren." "Danach hier erneut suchen lassen."
+                        }
+                    } catch {
+                        Set-ModToolsResult $cfg "Fehler beim Einrichten von LSS" $_.Exception.Message "Bitte Pfade pruefen."
+                    }
+                }
+            }
+
+            # If in-game menu changed target FPS or mode, update profile and start LSS if needed
+            $curMode = Get-FramerateModeSetting $cfg
+            $curFps = Get-LsfgFpsSetting $cfg
+            if ($curMode -eq 'lossless') {
+                if ($lastSyncedFps -ne $curFps) {
+                    Set-LosslessScalingProfile $cfg -TargetFps $curFps
+                    $lastSyncedFps = $curFps
+                }
+                if (-not (Get-Process -Name "*LosslessScaling*" -ErrorAction SilentlyContinue)) {
+                    Start-LosslessScalingIfEnabled $cfg
                 }
             }
 
@@ -1182,6 +1472,7 @@ function Start-ModLoader {
             Start-Sleep -Milliseconds 150
         }
     } finally {
+        Stop-LosslessScalingIfStarted
         # Persist the active profile + restore the user's real saves, then vanilla.
         Swap-OutProfile $cfg
         Restore-Vanilla $cfg
@@ -1189,4 +1480,4 @@ function Start-ModLoader {
     }
 }
 
-Export-ModuleMember -Function Get-ModLoaderConfig, Backup-FileIfNeeded, Get-InstalledMods, Write-ModList, Restore-Vanilla, Apply-Mod, Clear-Signals, Read-Request, Set-Ready, Start-ModLoader, Get-ChapterSaveFiles, Write-ProfileList, Get-ProfileDir, Swap-InProfile, Swap-OutProfile, New-Profile, Remove-Profile, Read-ProfileCmd, Set-ProfileReady, Read-ModToolsCmd, Set-ModToolsResult, Get-SelectorVersion, Compare-SemVer, Test-DataWinPatched, Get-SelectorSettings, Set-SelectorSettings, Get-LatestSelectorRelease, Get-UtmtCli, Invoke-DataWinRepatch, Invoke-SelectorSelfUpdate, Invoke-UpdateCheck, Get-ThesiOverlaySetting, Set-ThesiOverlaySetting, Apply-ThesiOverlay, Get-Fps60PatchSetting, Set-Fps60PatchSetting, Get-GermanPatchSetting, Set-GermanPatchSetting, Get-MenuLangSetting, Set-MenuLangSetting, Apply-ChapterVariant, Get-ModMetadata, Set-ModMetadata, Get-GameBananaModInfo, Get-ModUpdates, Update-DeltaruneMod, Invoke-AutoImportFolder
+Export-ModuleMember -Function Get-ModLoaderConfig, Backup-FileIfNeeded, Get-InstalledMods, Write-ModList, Restore-Vanilla, Apply-Mod, Clear-Signals, Read-Request, Set-Ready, Start-ModLoader, Get-ChapterSaveFiles, Write-ProfileList, Get-ProfileDir, Swap-InProfile, Swap-OutProfile, New-Profile, Remove-Profile, Read-ProfileCmd, Set-ProfileReady, Read-ModToolsCmd, Set-ModToolsResult, Get-SelectorVersion, Compare-SemVer, Test-DataWinPatched, Get-SelectorSettings, Set-SelectorSettings, Get-LatestSelectorRelease, Get-UtmtCli, Invoke-DataWinRepatch, Invoke-SelectorSelfUpdate, Invoke-UpdateCheck, Get-ThesiOverlaySetting, Set-ThesiOverlaySetting, Apply-ThesiOverlay, Get-Fps60PatchSetting, Set-Fps60PatchSetting, Get-GermanPatchSetting, Set-GermanPatchSetting, Get-MenuLangSetting, Set-MenuLangSetting, Apply-ChapterVariant, Get-ModMetadata, Set-ModMetadata, Get-GameBananaModInfo, Get-ModUpdates, Update-DeltaruneMod, Invoke-AutoImportFolder, Get-FramerateModeSetting, Set-FramerateModeSetting, Get-LsfgFpsSetting, Set-LsfgFpsSetting, Find-LosslessScalingExe, Set-LosslessScalingProfile, Start-LosslessScalingIfEnabled, Stop-LosslessScalingIfStarted, Invoke-LosslessScalingFirstRunCheck

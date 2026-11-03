@@ -159,19 +159,74 @@ else
     file_text_close(_gpf2);
 }
 
-mm_fps60_patch = false;
-if (file_exists(""fps60_patch.txt""))
+mm_fps_mode = ""off"";
+if (file_exists(""fps_mode.txt""))
 {
-    var _fpf = file_text_open_read(""fps60_patch.txt"");
-    var _fpv = file_text_read_string(_fpf);
-    file_text_close(_fpf);
-    mm_fps60_patch = (string_length(_fpv) > 0 && string_char_at(_fpv, 1) == ""1"");
+    var _fmf = file_text_open_read(""fps_mode.txt"");
+    var _fmv = string_lower(file_text_read_string(_fmf));
+    file_text_close(_fmf);
+    if (string_pos(""lossless"", _fmv) > 0)
+        mm_fps_mode = ""lossless"";
+    else if (string_pos(""engine"", _fmv) > 0)
+        mm_fps_mode = ""engine"";
+    else
+        mm_fps_mode = ""off"";
+}
+else if (file_exists(""fps60_patch.txt""))
+{
+    var _fpf_legacy = file_text_open_read(""fps60_patch.txt"");
+    var _fpv_legacy = file_text_read_string(_fpf_legacy);
+    file_text_close(_fpf_legacy);
+    if (string_length(_fpv_legacy) > 0 && string_char_at(_fpv_legacy, 1) == ""1"")
+        mm_fps_mode = ""engine"";
+    else
+        mm_fps_mode = ""off"";
+    var _fmf2 = file_text_open_write(""fps_mode.txt"");
+    file_text_write_string(_fmf2, mm_fps_mode);
+    file_text_close(_fmf2);
 }
 else
 {
-    var _fpf2 = file_text_open_write(""fps60_patch.txt"");
-    file_text_write_string(_fpf2, ""0"");
-    file_text_close(_fpf2);
+    var _fmf3 = file_text_open_write(""fps_mode.txt"");
+    file_text_write_string(_fmf3, ""off"");
+    file_text_close(_fmf3);
+}
+
+mm_fps60_patch = (mm_fps_mode == ""engine"");
+
+mm_lsfg_fps = ""60"";
+if (file_exists(""lsfg_fps.txt""))
+{
+    var _lsf = file_text_open_read(""lsfg_fps.txt"");
+    var _lsv = file_text_read_string(_lsf);
+    file_text_close(_lsf);
+    if (string_pos(""240"", _lsv) > 0)
+        mm_lsfg_fps = ""240"";
+    else if (string_pos(""144"", _lsv) > 0)
+        mm_lsfg_fps = ""144"";
+    else if (string_pos(""120"", _lsv) > 0)
+        mm_lsfg_fps = ""120"";
+    else if (string_pos(""90"", _lsv) > 0)
+        mm_lsfg_fps = ""90"";
+    else
+        mm_lsfg_fps = ""60"";
+}
+else
+{
+    var _lsf2 = file_text_open_write(""lsfg_fps.txt"");
+    file_text_write_string(_lsf2, ""60"");
+    file_text_close(_lsf2);
+}
+
+mm_lsfg_fps_list = [""60"", ""90"", ""120"", ""144"", ""240""];
+mm_lsfg_fps_idx = 0;
+for (var _lsi = 0; _lsi < array_length(mm_lsfg_fps_list); _lsi++)
+{
+    if (mm_lsfg_fps_list[_lsi] == mm_lsfg_fps)
+    {
+        mm_lsfg_fps_idx = _lsi;
+        break;
+    }
 }
 
 mm_menu_lang = ""en"";
@@ -496,7 +551,8 @@ if (mm_state == ""select"")
 }
 else if (mm_state == ""settings"")
 {
-    var _cat_count = 5;
+    var _has_lsfg = (!mm_thesi_unlocked && mm_fps_mode == ""lossless"");
+    var _cat_count = _has_lsfg ? 6 : 5;
     if (up_p())
     {
         mm_sidx = ((mm_sidx - 1) + _cat_count) mod _cat_count;
@@ -525,32 +581,58 @@ else if (mm_state == ""settings"")
             }
             else
             {
-                mm_fps60_patch = !mm_fps60_patch;
+                var _dir = left_p() ? -1 : 1;
                 audio_play_sound(snd_select, 50, 0);
+                if (mm_fps_mode == ""off"")
+                    mm_fps_mode = (_dir > 0) ? ""engine"" : ""lossless"";
+                else if (mm_fps_mode == ""engine"")
+                    mm_fps_mode = (_dir > 0) ? ""lossless"" : ""off"";
+                else
+                    mm_fps_mode = (_dir > 0) ? ""off"" : ""engine"";
+
+                mm_fps60_patch = (mm_fps_mode == ""engine"");
+                var _fmf = file_text_open_write(""fps_mode.txt"");
+                file_text_write_string(_fmf, mm_fps_mode);
+                file_text_close(_fmf);
                 var _fpf = file_text_open_write(""fps60_patch.txt"");
                 file_text_write_string(_fpf, mm_fps60_patch ? ""1"" : ""0"");
                 file_text_close(_fpf);
             }
         }
+        else if (_has_lsfg && mm_sidx == 1)
+        {
+            var _dir2 = left_p() ? -1 : 1;
+            audio_play_sound(snd_select, 50, 0);
+            var _fps_len = array_length(mm_lsfg_fps_list);
+            if (_dir2 > 0)
+                mm_lsfg_fps_idx = (mm_lsfg_fps_idx + 1) mod _fps_len;
+            else
+                mm_lsfg_fps_idx = ((mm_lsfg_fps_idx - 1) + _fps_len) mod _fps_len;
+            mm_lsfg_fps = mm_lsfg_fps_list[mm_lsfg_fps_idx];
+            var _lsf = file_text_open_write(""lsfg_fps.txt"");
+            file_text_write_string(_lsf, mm_lsfg_fps);
+            file_text_close(_lsf);
+        }
         else if (_s_action || right_p())
         {
+            var _target_idx = _has_lsfg ? (mm_sidx - 1) : mm_sidx;
             audio_play_sound(snd_select, 50, 0);
-            if (mm_sidx == 1)
+            if (_target_idx == 1)
             {
                 mm_state = ""settings_lang"";
                 mm_sub_idx = 0;
             }
-            else if (mm_sidx == 2)
+            else if (_target_idx == 2)
             {
                 mm_state = ""settings_mods"";
                 mm_sub_idx = 0;
             }
-            else if (mm_sidx == 3)
+            else if (_target_idx == 3)
             {
                 mm_state = ""credits"";
                 mm_credits_scroll = 0;
             }
-            else if (mm_sidx == 4)
+            else if (_target_idx == 4)
             {
                 audio_play_sound(snd_swing, 50, 0);
                 mm_state = ""select"";
@@ -565,7 +647,8 @@ else if (mm_state == ""settings"")
 }
 else if (mm_state == ""settings_gfx"")
 {
-    var _count = mm_thesi_unlocked ? 4 : 2;
+    var _has_lsfg = (mm_fps_mode == ""lossless"");
+    var _count = mm_thesi_unlocked ? (_has_lsfg ? 5 : 4) : (_has_lsfg ? 2 : 1);
     if (up_p())
     {
         mm_sub_idx = ((mm_sub_idx - 1) + _count) mod _count;
@@ -584,42 +667,71 @@ else if (mm_state == ""settings_gfx"")
     {
         if (mm_sub_idx == 0)
         {
-            mm_fps60_patch = !mm_fps60_patch;
+            var _dir = left_p() ? -1 : 1;
             audio_play_sound(snd_select, 50, 0);
+            if (mm_fps_mode == ""off"")
+                mm_fps_mode = (_dir > 0) ? ""engine"" : ""lossless"";
+            else if (mm_fps_mode == ""engine"")
+                mm_fps_mode = (_dir > 0) ? ""lossless"" : ""off"";
+            else
+                mm_fps_mode = (_dir > 0) ? ""off"" : ""engine"";
+
+            mm_fps60_patch = (mm_fps_mode == ""engine"");
+            var _fmf = file_text_open_write(""fps_mode.txt"");
+            file_text_write_string(_fmf, mm_fps_mode);
+            file_text_close(_fmf);
             var _fpf = file_text_open_write(""fps60_patch.txt"");
             file_text_write_string(_fpf, mm_fps60_patch ? ""1"" : ""0"");
             file_text_close(_fpf);
         }
-        else if (mm_thesi_unlocked && mm_sub_idx == 1)
+        else if (_has_lsfg && mm_sub_idx == 1)
         {
-            mm_thesi_overlay = !mm_thesi_overlay;
+            var _dir2 = left_p() ? -1 : 1;
             audio_play_sound(snd_select, 50, 0);
-            var _tof = file_text_open_write(""thesi_overlay.txt"");
-            file_text_write_string(_tof, mm_thesi_overlay ? ""1"" : ""0"");
-            file_text_close(_tof);
+            var _fps_len = array_length(mm_lsfg_fps_list);
+            if (_dir2 > 0)
+                mm_lsfg_fps_idx = (mm_lsfg_fps_idx + 1) mod _fps_len;
+            else
+                mm_lsfg_fps_idx = ((mm_lsfg_fps_idx - 1) + _fps_len) mod _fps_len;
+            mm_lsfg_fps = mm_lsfg_fps_list[mm_lsfg_fps_idx];
+            var _lsf = file_text_open_write(""lsfg_fps.txt"");
+            file_text_write_string(_lsf, mm_lsfg_fps);
+            file_text_close(_lsf);
         }
-        else if (mm_thesi_unlocked && mm_sub_idx == 2)
+        else
         {
-            if (_act)
+            var _eff_idx = _has_lsfg ? (mm_sub_idx - 1) : mm_sub_idx;
+            if (mm_thesi_unlocked && _eff_idx == 1)
+            {
+                mm_thesi_overlay = !mm_thesi_overlay;
+                audio_play_sound(snd_select, 50, 0);
+                var _tof = file_text_open_write(""thesi_overlay.txt"");
+                file_text_write_string(_tof, mm_thesi_overlay ? ""1"" : ""0"");
+                file_text_close(_tof);
+            }
+            else if (mm_thesi_unlocked && _eff_idx == 2)
+            {
+                if (_act)
+                {
+                    audio_play_sound(snd_swing, 50, 0);
+                    mm_thesi_unlocked = false;
+                    mm_thesi_overlay = false;
+                    if (file_exists(""thesi_unlocked.txt""))
+                        file_delete(""thesi_unlocked.txt"");
+                    var _tof_l = file_text_open_write(""thesi_overlay.txt"");
+                    file_text_write_string(_tof_l, ""0"");
+                    file_text_close(_tof_l);
+                    mm_load_modlist();
+                    mm_sub_idx = 0;
+                    mm_sidx = 0;
+                    mm_state = ""settings"";
+                }
+            }
+            else if ((mm_thesi_unlocked && _eff_idx == 3) || (!mm_thesi_unlocked && _eff_idx == 1))
             {
                 audio_play_sound(snd_swing, 50, 0);
-                mm_thesi_unlocked = false;
-                mm_thesi_overlay = false;
-                if (file_exists(""thesi_unlocked.txt""))
-                    file_delete(""thesi_unlocked.txt"");
-                var _tof_l = file_text_open_write(""thesi_overlay.txt"");
-                file_text_write_string(_tof_l, ""0"");
-                file_text_close(_tof_l);
-                mm_load_modlist();
-                mm_sub_idx = 0;
-                mm_sidx = 0;
                 mm_state = ""settings"";
             }
-        }
-        else if ((mm_thesi_unlocked && mm_sub_idx == 3) || (!mm_thesi_unlocked && mm_sub_idx == 1))
-        {
-            audio_play_sound(snd_swing, 50, 0);
-            mm_state = ""settings"";
         }
     }
     else if (_cancel)
@@ -680,7 +792,7 @@ else if (mm_state == ""settings_lang"")
 }
 else if (mm_state == ""settings_mods"")
 {
-    var _count = 4;
+    var _count = 5;
     if (up_p())
     {
         mm_sub_idx = ((mm_sub_idx - 1) + _count) mod _count;
@@ -733,13 +845,30 @@ else if (mm_state == ""settings_mods"")
         }
         else if (mm_sub_idx == 2)
         {
+            if (_act)
+            {
+                audio_play_sound(snd_select, 50, 0);
+                var _scf = file_text_open_write(""mod_tools_cmd.txt"");
+                file_text_write_string(_scf, ""scan_lss"");
+                file_text_close(_scf);
+                mm_tools_op = ""scan_lss"";
+                mm_tools_status = _is_de ? ""Suche Lossless Scaling..."" : ""Scanning for Lossless Scaling..."";
+                mm_tools_result1 = """";
+                mm_tools_result2 = """";
+                mm_tools_result3 = """";
+                mm_tools_timer = 0;
+                mm_state = ""modtools_wait"";
+            }
+        }
+        else if (mm_sub_idx == 3)
+        {
             mm_autoupdate = !mm_autoupdate;
             audio_play_sound(snd_select, 50, 0);
             var _uf = file_text_open_write(""autoupdate.txt"");
             file_text_write_string(_uf, mm_autoupdate ? ""1"" : ""0"");
             file_text_close(_uf);
         }
-        else if (mm_sub_idx == 3)
+        else if (mm_sub_idx == 4)
         {
             audio_play_sound(snd_swing, 50, 0);
             mm_state = ""settings"";
@@ -768,6 +897,35 @@ else if (mm_state == ""modtools_wait"")
         file_delete(""mod_tools_ready.txt"");
         if (file_exists(""mod_tools_cmd.txt""))
             file_delete(""mod_tools_cmd.txt"");
+
+        if (file_exists(""fps_mode.txt""))
+        {
+            var _fmf = file_text_open_read(""fps_mode.txt"");
+            var _fmv = string_lower(file_text_read_string(_fmf));
+            file_text_close(_fmf);
+            if (string_pos(""lossless"", _fmv) > 0)
+                mm_fps_mode = ""lossless"";
+            else if (string_pos(""engine"", _fmv) > 0)
+                mm_fps_mode = ""engine"";
+            else
+                mm_fps_mode = ""off"";
+            mm_fps60_patch = (mm_fps_mode == ""engine"");
+        }
+        if (file_exists(""lsfg_fps.txt""))
+        {
+            var _lsf = file_text_open_read(""lsfg_fps.txt"");
+            var _lsv = file_text_read_string(_lsf);
+            file_text_close(_lsf);
+            if (string_pos(""240"", _lsv) > 0) mm_lsfg_fps = ""240"";
+            else if (string_pos(""144"", _lsv) > 0) mm_lsfg_fps = ""144"";
+            else if (string_pos(""120"", _lsv) > 0) mm_lsfg_fps = ""120"";
+            else if (string_pos(""90"", _lsv) > 0) mm_lsfg_fps = ""90"";
+            else mm_lsfg_fps = ""60"";
+            for (var _lsi = 0; _lsi < array_length(mm_lsfg_fps_list); _lsi++)
+            {
+                if (mm_lsfg_fps_list[_lsi] == mm_lsfg_fps) { mm_lsfg_fps_idx = _lsi; break; }
+            }
+        }
 
         mm_load_modlist();
         audio_play_sound(snd_select, 50, 0);
@@ -1095,11 +1253,12 @@ else if (mm_state == ""settings"")
 {
     draw_text(_cx, _gh * 0.165, _is_de ? ""EINSTELLUNGEN"" : ""SETTINGS"");
 
+    var _has_lsfg = (!mm_thesi_unlocked && mm_fps_mode == ""lossless"");
     var _barw = 236;
     var _s_y = _gh * 0.23;
     var _s_step = 42;
 
-    // Category 0: Grafik & Performance (when Thesi unlocked) OR 60 FPS Overhaul toggle (when locked)
+    // Category 0: Grafik & Performance (when Thesi unlocked) OR Framerate Mode (when locked)
     var _y0 = _s_y;
     if (mm_sidx == 0)
     {
@@ -1113,67 +1272,90 @@ else if (mm_state == ""settings"")
     {
         draw_text(_cx, _y0, _is_de ? ""Grafik & Performance  >"" : ""Graphics & Performance  >"");
         draw_set_color(c_silver);
-        draw_text_transformed(_cx, _y0 + 18, _is_de ? ""60 FPS, Thesi-Kris & Grafik-Optionen"" : ""60 FPS, Thesi Kris & graphics options"", 0.7, 0.7, 0);
+        draw_text_transformed(_cx, _y0 + 18, _is_de ? ""Lossless Scaling, Thesi-Kris & Grafik-Optionen"" : ""Lossless Scaling, Thesi Kris & graphics options"", 0.7, 0.7, 0);
     }
     else
     {
-        draw_text(_cx, _y0, _is_de ? (""60 FPS Overhaul:  "" + (mm_fps60_patch ? ""[AKTIV]"" : ""[AUS]"")) : (""60 FPS Overhaul:  "" + (mm_fps60_patch ? ""[ON]"" : ""[OFF]"")));
-        draw_set_color(mm_fps60_patch ? c_lime : c_dkgray);
-        draw_text_transformed(_cx, _y0 + 18, _is_de ? ""60 FPS Physik- und Frame-Pacing-Anpassungen"" : ""60 FPS physics and frame pacing overhaul"", 0.7, 0.7, 0);
+        var _mode_txt = (mm_fps_mode == ""lossless"") ? ""[Lossless Scaling]"" : ((mm_fps_mode == ""engine"") ? ""[Engine-Mod (60)]"" : (_is_de ? ""[Aus (30)]"" : ""[Off (30)]""));
+        draw_text(_cx, _y0, (_is_de ? ""Framerate-Modus:  "" : ""Framerate Mode:  "") + _mode_txt);
+        draw_set_color((mm_fps_mode == ""lossless"") ? c_aqua : ((mm_fps_mode == ""engine"") ? c_lime : c_dkgray));
+        var _sub_txt = (mm_fps_mode == ""lossless"") ? (_is_de ? ""GPU-Frame-Gen (LSFG 2.3) - Funktioniert mit ALLEN Mods!"" : ""GPU frame-gen (LSFG 2.3) - Works on ALL mods!"") : ((mm_fps_mode == ""engine"") ? (_is_de ? ""Nativer 60 FPS Bytecode-Patch (nur Vanilla)"" : ""Native 60 FPS bytecode patch (vanilla only)"") : (_is_de ? ""Originale 30 FPS Spielgeschwindigkeit"" : ""Original 30 FPS game speed""));
+        draw_text_transformed(_cx, _y0 + 18, _sub_txt, 0.7, 0.7, 0);
     }
 
-    // Category 1: Sprache & Lokalisierung
-    var _y1 = _s_y + _s_step;
-    if (mm_sidx == 1)
+    var _y_curr = _s_y + _s_step;
+
+    // Item 1 (if _has_lsfg): LSFG Ziel-FPS
+    if (_has_lsfg)
+    {
+        if (mm_sidx == 1)
+        {
+            draw_set_color(c_yellow);
+            draw_rectangle(_cx - _barw, _y_curr - 4, _cx + _barw, _y_curr + 36, true);
+            mm_draw_soul(_cx - _barw + 12, _y_curr + 12);
+        }
+        else draw_set_color(c_white);
+        draw_text(_cx, _y_curr, (_is_de ? ""LSFG Ziel-FPS:  ["" : ""LSFG Target FPS:  ["") + mm_lsfg_fps + "" FPS]"");
+        draw_set_color(c_aqua);
+        draw_text_transformed(_cx, _y_curr + 18, _is_de ? ""Ziel-Framerate fuer Zwischenbildberechnung"" : ""Target framerate for frame generation"", 0.7, 0.7, 0);
+        _y_curr += _s_step;
+    }
+
+    // Category: Sprache & Lokalisierung
+    var _idx_lang = _has_lsfg ? 2 : 1;
+    if (mm_sidx == _idx_lang)
     {
         draw_set_color(c_yellow);
-        draw_rectangle(_cx - _barw, _y1 - 4, _cx + _barw, _y1 + 36, true);
-        mm_draw_soul(_cx - _barw + 12, _y1 + 12);
+        draw_rectangle(_cx - _barw, _y_curr - 4, _cx + _barw, _y_curr + 36, true);
+        mm_draw_soul(_cx - _barw + 12, _y_curr + 12);
     }
     else draw_set_color(c_white);
-    draw_text(_cx, _y1, _is_de ? ""Sprache & Text  >"" : ""Language & Text  >"");
+    draw_text(_cx, _y_curr, _is_de ? ""Sprache & Text  >"" : ""Language & Text  >"");
     draw_set_color(c_silver);
-    draw_text_transformed(_cx, _y1 + 18, _is_de ? ""Deutsch-Patch & Menue-Sprache"" : ""German patch & menu language"", 0.7, 0.7, 0);
+    draw_text_transformed(_cx, _y_curr + 18, _is_de ? ""Deutsch-Patch & Menue-Sprache"" : ""German patch & menu language"", 0.7, 0.7, 0);
+    _y_curr += _s_step;
 
-    // Category 2: Mod-Verwaltung & Updates
-    var _y2 = _s_y + _s_step * 2;
-    if (mm_sidx == 2)
+    // Category: Mod-Verwaltung & Updates
+    var _idx_mods = _has_lsfg ? 3 : 2;
+    if (mm_sidx == _idx_mods)
     {
         draw_set_color(c_yellow);
-        draw_rectangle(_cx - _barw, _y2 - 4, _cx + _barw, _y2 + 36, true);
-        mm_draw_soul(_cx - _barw + 12, _y2 + 12);
+        draw_rectangle(_cx - _barw, _y_curr - 4, _cx + _barw, _y_curr + 36, true);
+        mm_draw_soul(_cx - _barw + 12, _y_curr + 12);
     }
     else draw_set_color(c_white);
-    draw_text(_cx, _y2, _is_de ? ""Mod-Verwaltung & Updates  >"" : ""Mods & Updates  >"");
+    draw_text(_cx, _y_curr, _is_de ? ""Mod-Verwaltung & Updates  >"" : ""Mods & Updates  >"");
     draw_set_color(c_silver);
-    draw_text_transformed(_cx, _y2 + 18, _is_de ? ""Mod-Updates pruefen, Auto-Import & Selector"" : ""Check mod updates, auto-import & selector"", 0.7, 0.7, 0);
+    draw_text_transformed(_cx, _y_curr + 18, _is_de ? ""Lossless Scaling suchen, Updates & Auto-Import"" : ""Scan Lossless Scaling, updates & auto-import"", 0.7, 0.7, 0);
+    _y_curr += _s_step;
 
-    // Category 3: Credits & Danksagung
-    var _y3 = _s_y + _s_step * 3;
-    if (mm_sidx == 3)
+    // Category: Credits & Danksagung
+    var _idx_cred = _has_lsfg ? 4 : 3;
+    if (mm_sidx == _idx_cred)
     {
         draw_set_color(c_yellow);
-        draw_rectangle(_cx - _barw, _y3 - 4, _cx + _barw, _y3 + 36, true);
-        mm_draw_soul(_cx - _barw + 12, _y3 + 12);
+        draw_rectangle(_cx - _barw, _y_curr - 4, _cx + _barw, _y_curr + 36, true);
+        mm_draw_soul(_cx - _barw + 12, _y_curr + 12);
     }
     else draw_set_color(c_white);
-    draw_text(_cx, _y3, _is_de ? ""Credits & Danksagung  >"" : ""Credits & Contributors  >"");
+    draw_text(_cx, _y_curr, _is_de ? ""Credits & Danksagung  >"" : ""Credits & Contributors  >"");
     draw_set_color(c_silver);
-    draw_text_transformed(_cx, _y3 + 18, _is_de ? ""Mitwirkende, Team & Danksagung ansehen"" : ""View creators, team and contributors"", 0.7, 0.7, 0);
+    draw_text_transformed(_cx, _y_curr + 18, _is_de ? ""Mitwirkende, Team & Danksagung ansehen"" : ""View creators, team and contributors"", 0.7, 0.7, 0);
+    _y_curr += _s_step + 4;
 
-    // Category 4: Zurueck zum Menue
-    var _y4 = _s_y + _s_step * 4 + 6;
-    if (mm_sidx == 4)
+    // Category: Zurueck zum Menue
+    var _idx_back = _has_lsfg ? 5 : 4;
+    if (mm_sidx == _idx_back)
     {
         draw_set_color(c_yellow);
-        draw_rectangle(_cx - _barw, _y4 - 4, _cx + _barw, _y4 + 26, true);
-        mm_draw_soul(_cx - _barw + 12, _y4 + 7);
+        draw_rectangle(_cx - _barw, _y_curr - 4, _cx + _barw, _y_curr + 26, true);
+        mm_draw_soul(_cx - _barw + 12, _y_curr + 7);
     }
     else draw_set_color(c_white);
-    draw_text(_cx, _y4 + 2, _is_de ? ""< Zurueck zum Hauptmenue"" : ""< Back to Main Menu"");
+    draw_text(_cx, _y_curr + 2, _is_de ? ""< Zurueck zum Hauptmenue"" : ""< Back to Main Menu"");
 
     draw_set_color(c_white);
-    if (!mm_thesi_unlocked && mm_sidx == 0)
+    if (!mm_thesi_unlocked && (mm_sidx == 0 || (_has_lsfg && mm_sidx == 1)))
         draw_text(_cx, _gh * 0.855, _is_de ? (""[Z]/("" + mm_b_confirm + "") oder [<]/[>] Umschalten      [X]/("" + mm_b_back + "") Zurueck"") : (""[Z]/("" + mm_b_confirm + "") or [<]/[>] Toggle      [X]/("" + mm_b_back + "") Back""));
     else
         draw_text(_cx, _gh * 0.855, _is_de ? (""[Z]/("" + mm_b_confirm + "") Kategorie oeffnen      [X]/("" + mm_b_back + "") Zurueck"") : (""[Z]/("" + mm_b_confirm + "") Open Category      [X]/("" + mm_b_back + "") Back""));
@@ -1182,11 +1364,12 @@ else if (mm_state == ""settings_gfx"")
 {
     draw_text(_cx, _gh * 0.165, _is_de ? ""GRAFIK & PERFORMANCE"" : ""GRAPHICS & PERFORMANCE"");
 
+    var _has_lsfg = (mm_fps_mode == ""lossless"");
     var _barw = 236;
     var _s_y = _gh * 0.24;
     var _s_step = 44;
 
-    // Item 0: 60 FPS Overhaul
+    // Item 0: Framerate-Modus
     var _y0 = _s_y;
     if (mm_sub_idx == 0)
     {
@@ -1195,61 +1378,83 @@ else if (mm_state == ""settings_gfx"")
         mm_draw_soul(_cx - _barw + 12, _y0 + 12);
     }
     else draw_set_color(c_white);
-    draw_text(_cx, _y0, _is_de ? (""60 FPS Overhaul (Spiel):  "" + (mm_fps60_patch ? ""[AKTIV]"" : ""[AUS]"")) : (""60 FPS Overhaul (Game):  "" + (mm_fps60_patch ? ""[ON]"" : ""[OFF]"")));
-    draw_set_color(mm_fps60_patch ? c_lime : c_dkgray);
-    draw_text_transformed(_cx, _y0 + 18, _is_de ? ""Fluessige 60 Bilder pro Sekunde (Kapitel 1 - 5)"" : ""Silky smooth 60 frames per second (Chapters 1 - 5)"", 0.7, 0.7, 0);
+    var _mode_txt = (mm_fps_mode == ""lossless"") ? ""[Lossless Scaling]"" : ((mm_fps_mode == ""engine"") ? ""[Engine-Mod (60)]"" : (_is_de ? ""[Aus (30)]"" : ""[Off (30)]""));
+    draw_text(_cx, _y0, (_is_de ? ""Framerate-Modus:  "" : ""Framerate Mode:  "") + _mode_txt);
+    draw_set_color((mm_fps_mode == ""lossless"") ? c_aqua : ((mm_fps_mode == ""engine"") ? c_lime : c_dkgray));
+    var _sub_txt = (mm_fps_mode == ""lossless"") ? (_is_de ? ""GPU-Frame-Gen (LSFG 2.3) - Funktioniert mit ALLEN Mods!"" : ""GPU frame-gen (LSFG 2.3) - Works on ALL mods!"") : ((mm_fps_mode == ""engine"") ? (_is_de ? ""Nativer 60 FPS Bytecode-Patch (nur Vanilla)"" : ""Native 60 FPS bytecode patch (vanilla only)"") : (_is_de ? ""Originale 30 FPS Spielgeschwindigkeit"" : ""Original 30 FPS game speed""));
+    draw_text_transformed(_cx, _y0 + 18, _sub_txt, 0.7, 0.7, 0);
+
+    var _y_curr = _s_y + _s_step;
+
+    // Item 1 (if _has_lsfg): LSFG Ziel-FPS
+    if (_has_lsfg)
+    {
+        if (mm_sub_idx == 1)
+        {
+            draw_set_color(c_yellow);
+            draw_rectangle(_cx - _barw, _y_curr - 4, _cx + _barw, _y_curr + 36, true);
+            mm_draw_soul(_cx - _barw + 12, _y_curr + 12);
+        }
+        else draw_set_color(c_white);
+        draw_text(_cx, _y_curr, (_is_de ? ""LSFG Ziel-FPS:  ["" : ""LSFG Target FPS:  ["") + mm_lsfg_fps + "" FPS]"");
+        draw_set_color(c_aqua);
+        draw_text_transformed(_cx, _y_curr + 18, _is_de ? ""Ziel-Framerate fuer Zwischenbildberechnung"" : ""Target framerate for frame generation"", 0.7, 0.7, 0);
+        _y_curr += _s_step;
+    }
 
     if (mm_thesi_unlocked)
     {
-        // Item 1: Thesi-Kris Texturen
-        var _y1 = _s_y + _s_step;
-        if (mm_sub_idx == 1)
+        // Item: Thesi-Kris Texturen
+        var _idx_thesi = _has_lsfg ? 2 : 1;
+        if (mm_sub_idx == _idx_thesi)
         {
             draw_set_color(c_yellow);
-            draw_rectangle(_cx - _barw, _y1 - 4, _cx + _barw, _y1 + 36, true);
-            mm_draw_soul(_cx - _barw + 12, _y1 + 12);
+            draw_rectangle(_cx - _barw, _y_curr - 4, _cx + _barw, _y_curr + 36, true);
+            mm_draw_soul(_cx - _barw + 12, _y_curr + 12);
         }
         else draw_set_color(c_white);
-        draw_text(_cx, _y1, _is_de ? (""Thesi-Kris Texturen:  "" + (mm_thesi_overlay ? ""[AKTIV]"" : ""[AUS]"")) : (""Thesi Kris Textures:  "" + (mm_thesi_overlay ? ""[ON]"" : ""[OFF]"")));
+        draw_text(_cx, _y_curr, _is_de ? (""Thesi-Kris Texturen:  "" + (mm_thesi_overlay ? ""[AKTIV]"" : ""[AUS]"")) : (""Thesi Kris Textures:  "" + (mm_thesi_overlay ? ""[ON]"" : ""[OFF]"")));
         draw_set_color(mm_thesi_overlay ? c_lime : c_dkgray);
-        draw_text_transformed(_cx, _y1 + 18, _is_de ? ""Kris mit Thesi-Haaren auf Mods anwenden"" : ""Apply Kris with Thesi hair overlay to mods"", 0.7, 0.7, 0);
+        draw_text_transformed(_cx, _y_curr + 18, _is_de ? ""Kris mit Thesi-Haaren auf Mods anwenden"" : ""Apply Kris with Thesi hair overlay to mods"", 0.7, 0.7, 0);
+        _y_curr += _s_step;
 
-        // Item 2: Thesi-Modus sperren
-        var _y2 = _s_y + _s_step * 2;
-        if (mm_sub_idx == 2)
+        // Item: Thesi-Modus sperren
+        var _idx_relock = _has_lsfg ? 3 : 2;
+        if (mm_sub_idx == _idx_relock)
         {
             draw_set_color(c_yellow);
-            draw_rectangle(_cx - _barw, _y2 - 4, _cx + _barw, _y2 + 36, true);
-            mm_draw_soul(_cx - _barw + 12, _y2 + 12);
+            draw_rectangle(_cx - _barw, _y_curr - 4, _cx + _barw, _y_curr + 36, true);
+            mm_draw_soul(_cx - _barw + 12, _y_curr + 12);
         }
         else draw_set_color(c_white);
-        draw_text(_cx, _y2, _is_de ? ""Thesi-Modus sperren / zuruecksetzen"" : ""Lock & Reset Thesi Mode"");
+        draw_text(_cx, _y_curr, _is_de ? ""Thesi-Modus sperren / zuruecksetzen"" : ""Lock & Reset Thesi Mode"");
         draw_set_color(c_orange);
-        draw_text_transformed(_cx, _y2 + 18, _is_de ? ""Modus wieder sperren und als Secret verbergen"" : ""Relock Thesi mode and hide it as a secret again"", 0.7, 0.7, 0);
+        draw_text_transformed(_cx, _y_curr + 18, _is_de ? ""Modus wieder sperren und als Secret verbergen"" : ""Relock Thesi mode and hide it as a secret again"", 0.7, 0.7, 0);
+        _y_curr += _s_step + 4;
 
-        // Item 3: Zurueck
-        var _y3 = _s_y + _s_step * 3 + 8;
-        if (mm_sub_idx == 3)
+        // Item: Zurueck
+        var _idx_back = _has_lsfg ? 4 : 3;
+        if (mm_sub_idx == _idx_back)
         {
             draw_set_color(c_yellow);
-            draw_rectangle(_cx - _barw, _y3 - 4, _cx + _barw, _y3 + 26, true);
-            mm_draw_soul(_cx - _barw + 12, _y3 + 7);
+            draw_rectangle(_cx - _barw, _y_curr - 4, _cx + _barw, _y_curr + 26, true);
+            mm_draw_soul(_cx - _barw + 12, _y_curr + 7);
         }
         else draw_set_color(c_white);
-        draw_text(_cx, _y3 + 2, _is_de ? ""< Zurueck zu Einstellungen"" : ""< Back to Settings"");
+        draw_text(_cx, _y_curr + 2, _is_de ? ""< Zurueck zu Einstellungen"" : ""< Back to Settings"");
     }
     else
     {
-        // Item 1: Zurueck
-        var _y1 = _s_y + _s_step + 8;
-        if (mm_sub_idx == 1)
+        // Item: Zurueck
+        var _idx_back = _has_lsfg ? 2 : 1;
+        if (mm_sub_idx == _idx_back)
         {
             draw_set_color(c_yellow);
-            draw_rectangle(_cx - _barw, _y1 - 4, _cx + _barw, _y1 + 26, true);
-            mm_draw_soul(_cx - _barw + 12, _y1 + 7);
+            draw_rectangle(_cx - _barw, _y_curr - 4, _cx + _barw, _y_curr + 26, true);
+            mm_draw_soul(_cx - _barw + 12, _y_curr + 7);
         }
         else draw_set_color(c_white);
-        draw_text(_cx, _y1 + 2, _is_de ? ""< Zurueck zu Einstellungen"" : ""< Back to Settings"");
+        draw_text(_cx, _y_curr + 2, _is_de ? ""< Zurueck zu Einstellungen"" : ""< Back to Settings"");
     }
 
     draw_set_color(c_white);
@@ -1308,8 +1513,8 @@ else if (mm_state == ""settings_mods"")
     draw_text(_cx, _gh * 0.165, _is_de ? ""MOD-VERWALTUNG & UPDATES"" : ""MODS & UPDATES"");
 
     var _barw = 236;
-    var _s_y = _gh * 0.23;
-    var _s_step = 44;
+    var _s_y = _gh * 0.22;
+    var _s_step = 42;
 
     // Item 0: Mod-Updates pruefen
     var _y0 = _s_y;
@@ -1337,7 +1542,7 @@ else if (mm_state == ""settings_mods"")
     draw_set_color(c_aqua);
     draw_text_transformed(_cx, _y1 + 18, _is_de ? ""Archive aus 'mods\_import' jetzt installieren"" : ""Install archives from 'mods\_import' now"", 0.7, 0.7, 0);
 
-    // Item 2: Selector Auto-Update
+    // Item 2: Nach Lossless Scaling suchen
     var _y2 = _s_y + _s_step * 2;
     if (mm_sub_idx == 2)
     {
@@ -1346,20 +1551,33 @@ else if (mm_state == ""settings_mods"")
         mm_draw_soul(_cx - _barw + 12, _y2 + 12);
     }
     else draw_set_color(c_white);
-    draw_text(_cx, _y2, _is_de ? (""Selector Auto-Update:  "" + (mm_autoupdate ? ""[AKTIV]"" : ""[AUS]"")) : (""Selector Auto-Update:  "" + (mm_autoupdate ? ""[ON]"" : ""[OFF]"")));
-    draw_set_color(mm_autoupdate ? c_lime : c_dkgray);
-    draw_text_transformed(_cx, _y2 + 18, _is_de ? ""Automatisch nach neuen Versionen suchen"" : ""Automatically check for new versions on GitHub"", 0.7, 0.7, 0);
+    draw_text(_cx, _y2, _is_de ? ""Nach Lossless Scaling suchen  >"" : ""Scan for Lossless Scaling  >"");
+    draw_set_color(c_aqua);
+    draw_text_transformed(_cx, _y2 + 18, _is_de ? ""Steam-Installation pruefen & DELTARUNE-Profil einrichten"" : ""Verify Steam install & configure DELTARUNE profile"", 0.7, 0.7, 0);
 
-    // Item 3: Zurueck
-    var _y3 = _s_y + _s_step * 3 + 8;
+    // Item 3: Selector Auto-Update
+    var _y3 = _s_y + _s_step * 3;
     if (mm_sub_idx == 3)
     {
         draw_set_color(c_yellow);
-        draw_rectangle(_cx - _barw, _y3 - 4, _cx + _barw, _y3 + 26, true);
-        mm_draw_soul(_cx - _barw + 12, _y3 + 7);
+        draw_rectangle(_cx - _barw, _y3 - 4, _cx + _barw, _y3 + 36, true);
+        mm_draw_soul(_cx - _barw + 12, _y3 + 12);
     }
     else draw_set_color(c_white);
-    draw_text(_cx, _y3 + 2, _is_de ? ""< Zurueck zu Einstellungen"" : ""< Back to Settings"");
+    draw_text(_cx, _y3, _is_de ? (""Selector Auto-Update:  "" + (mm_autoupdate ? ""[AKTIV]"" : ""[AUS]"")) : (""Selector Auto-Update:  "" + (mm_autoupdate ? ""[ON]"" : ""[OFF]"")));
+    draw_set_color(mm_autoupdate ? c_lime : c_dkgray);
+    draw_text_transformed(_cx, _y3 + 18, _is_de ? ""Automatisch nach neuen Versionen suchen"" : ""Automatically check for new versions on GitHub"", 0.7, 0.7, 0);
+
+    // Item 4: Zurueck
+    var _y4 = _s_y + _s_step * 4 + 6;
+    if (mm_sub_idx == 4)
+    {
+        draw_set_color(c_yellow);
+        draw_rectangle(_cx - _barw, _y4 - 4, _cx + _barw, _y4 + 26, true);
+        mm_draw_soul(_cx - _barw + 12, _y4 + 7);
+    }
+    else draw_set_color(c_white);
+    draw_text(_cx, _y4 + 2, _is_de ? ""< Zurueck zu Einstellungen"" : ""< Back to Settings"");
 
     draw_set_color(c_white);
     draw_text(_cx, _gh * 0.855, _is_de ? (""[Z]/("" + mm_b_confirm + "") Auswaehlen / Umschalten      [X]/("" + mm_b_back + "") Zurueck"") : (""[Z]/("" + mm_b_confirm + "") Select / Toggle      [X]/("" + mm_b_back + "") Back""));
@@ -1845,20 +2063,21 @@ else
 
     if (!_isprofile)
     {
+        var _fps_label = (mm_fps_mode == ""lossless"") ? (""LSFG "" + mm_lsfg_fps) : ((mm_fps_mode == ""engine"") ? ""60 FPS"" : ""30 FPS"");
         draw_set_color(c_yellow);
         if (_is_de)
         {
             if (mm_thesi_unlocked)
-                draw_text(_cx, _gh * 0.815, ""[S]/("" + mm_b_settings + "") Einstellungen   |   60 FPS: "" + (mm_fps60_patch ? ""[AN]"" : ""[AUS]"") + ""   Thesi: "" + (mm_thesi_overlay ? ""[AN]"" : ""[AUS]"") + ""   Deutsch: "" + (mm_german_patch ? ""[AN]"" : ""[AUS]""));
+                draw_text(_cx, _gh * 0.815, ""[S]/("" + mm_b_settings + "") Einstellungen   |   FPS: ["" + _fps_label + ""]   Thesi: "" + (mm_thesi_overlay ? ""[AN]"" : ""[AUS]"") + ""   Deutsch: "" + (mm_german_patch ? ""[AN]"" : ""[AUS]""));
             else
-                draw_text(_cx, _gh * 0.815, ""[S]/("" + mm_b_settings + "") Einstellungen   |   60 FPS: "" + (mm_fps60_patch ? ""[AN]"" : ""[AUS]"") + ""   Deutsch: "" + (mm_german_patch ? ""[AN]"" : ""[AUS]""));
+                draw_text(_cx, _gh * 0.815, ""[S]/("" + mm_b_settings + "") Einstellungen   |   FPS: ["" + _fps_label + ""]   Deutsch: "" + (mm_german_patch ? ""[AN]"" : ""[AUS]""));
         }
         else
         {
             if (mm_thesi_unlocked)
-                draw_text(_cx, _gh * 0.815, ""[S]/("" + mm_b_settings + "") Settings   |   60 FPS: "" + (mm_fps60_patch ? ""[ON]"" : ""[OFF]"") + ""   Thesi: "" + (mm_thesi_overlay ? ""[ON]"" : ""[OFF]"") + ""   German: "" + (mm_german_patch ? ""[ON]"" : ""[OFF]""));
+                draw_text(_cx, _gh * 0.815, ""[S]/("" + mm_b_settings + "") Settings   |   FPS: ["" + _fps_label + ""]   Thesi: "" + (mm_thesi_overlay ? ""[ON]"" : ""[OFF]"") + ""   German: "" + (mm_german_patch ? ""[ON]"" : ""[OFF]""));
             else
-                draw_text(_cx, _gh * 0.815, ""[S]/("" + mm_b_settings + "") Settings   |   60 FPS: "" + (mm_fps60_patch ? ""[ON]"" : ""[OFF]"") + ""   German: "" + (mm_german_patch ? ""[ON]"" : ""[OFF]""));
+                draw_text(_cx, _gh * 0.815, ""[S]/("" + mm_b_settings + "") Settings   |   FPS: ["" + _fps_label + ""]   German: "" + (mm_german_patch ? ""[ON]"" : ""[OFF]""));
         }
         draw_set_color(c_white);
     }
@@ -1869,9 +2088,9 @@ if (mm_state != ""thesi_anim"")
     // Credit lines -- clear above the bottom frame.
     draw_set_color(c_gray);
     if (mm_thesi_unlocked)
-        draw_text(_cx, _gh * 0.905, ""Mod-Selector v1.4.0 by Saloran26 & KajaKay_  -  Thesi Edition"");
+        draw_text(_cx, _gh * 0.905, ""Mod-Selector v1.5.0 by Saloran26 & KajaKay_  -  Thesi Edition"");
     else
-        draw_text(_cx, _gh * 0.905, ""Mod-Selector v1.4.0 by Saloran26"");
+        draw_text(_cx, _gh * 0.905, ""Mod-Selector v1.5.0 by Saloran26"");
 }
 
 draw_set_halign(fa_left);

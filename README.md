@@ -48,6 +48,7 @@ sauber auf Vanilla zurückgesetzt.
 | **UndertaleModTool** | [UnderminersTeam](https://github.com/UnderminersTeam/UndertaleModTool/releases) | **Pflicht** für den Menü-Einbau | einmal von Hand benutzen (Schritt 2); danach lädt der Loader die CLI-Version selbst nach `_tools\UTMT_CLI\` |
 | **Mods** (z. B. Kaizo Knight, Hardtype, Roaring Edition, Boss Rush) | die jeweiligen Mod-Autoren | optional | je ein Ordner in `mods\` – siehe [Einen Mod hinzufügen](#-einen-mod-hinzufügen) |
 | **Deutsch-Patch** | [GERMANRUNE](https://gamebanana.com/mods/629265) (Chexle / GermanRune-Team) | optional | nach `_germancache\` – siehe [Deutsch-Patch einfügen](#-deutsch-patch-einfügen) |
+| **Lossless Scaling (LSFG)** | THPhlash (über Steam) | optional | Steam-App; wird vom ModLoader vollautomatisch headless erkannt & für 60–240 FPS auf allen Mods eingerichtet |
 | **xdelta3** oder **DeltaPatcher** | jeweilige Autoren | nur für den Deutsch-Patch | irgendwo auf deinem PC |
 
 ---
