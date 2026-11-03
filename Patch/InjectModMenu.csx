@@ -299,6 +299,7 @@ array_push(mm_profiles, ""+ New Profile"");
 ";
 
 string STEP_GML = @"
+var _is_de = (mm_menu_lang == ""de"");
 var _cancel = button2_p();
 if (!_cancel)
 {
