@@ -609,13 +609,10 @@ function Set-LosslessScalingProfile {
 "@
         }
 
-        $settingsNode = $xml.Settings
-        if (-not $settingsNode.MinimizeToTray) {
-            $n = $xml.CreateElement("MinimizeToTray"); $n.InnerText = "true"; [void]$settingsNode.AppendChild($n)
-        } else { $settingsNode.MinimizeToTray = "true" }
-        if (-not $settingsNode.CloseToTray) {
-            $n = $xml.CreateElement("CloseToTray"); $n.InnerText = "true"; [void]$settingsNode.AppendChild($n)
-        } else { $settingsNode.CloseToTray = "true" }
+        _Set-LssSubnode $settingsNode "MinimizeToTray" "true"
+        _Set-LssSubnode $settingsNode "CloseToTray" "true"
+        _Set-LssSubnode $settingsNode "Hotkey" "S"
+        _Set-LssSubnode $settingsNode "HotkeyModifierKeys" "Alt Control"
 
         $profilesNode = $settingsNode.GameProfiles
         if (-not $profilesNode) {
@@ -642,13 +639,19 @@ function Set-LosslessScalingProfile {
         _Set-LssSubnode $deltaruneProfile "Path" "DELTARUNE.exe;*DELTARUNE*"
         _Set-LssSubnode $deltaruneProfile "AutoScale" "true"
         _Set-LssSubnode $deltaruneProfile "AutoScaleDelay" "3"
+        _Set-LssSubnode $deltaruneProfile "ScalingMode" "Auto"
+        _Set-LssSubnode $deltaruneProfile "ScalingFitMode" "AspectRatio"
         _Set-LssSubnode $deltaruneProfile "ScalingType" "Off"
         _Set-LssSubnode $deltaruneProfile "FrameGeneration" "LSFG3"
         _Set-LssSubnode $deltaruneProfile "LSFGSize" ($(if ($Mode -eq 'performance') { "PERFORMANCE" } else { "BALANCED" }))
         _Set-LssSubnode $deltaruneProfile "LSFGFlowScale" $Flow
         _Set-LssSubnode $deltaruneProfile "SyncMode" "DEFAULT"
+        _Set-LssSubnode $deltaruneProfile "MaxFrameLatency" "3"
+        _Set-LssSubnode $deltaruneProfile "GsyncSupport" "true"
         _Set-LssSubnode $deltaruneProfile "CaptureApi" "DXGI"
+        _Set-LssSubnode $deltaruneProfile "QueueTarget" "1"
         _Set-LssSubnode $deltaruneProfile "DrawFps" "true"
+        _Set-LssSubnode $deltaruneProfile "ClipCursor" "true"
 
         switch ($TargetFps) {
             "60"  { _Set-LssSubnode $deltaruneProfile "LSFG3Mode1" "FIXED"; _Set-LssSubnode $deltaruneProfile "LSFG3Multiplier" "2"; _Set-LssSubnode $deltaruneProfile "LSFG3Target" "60" }
@@ -666,40 +669,11 @@ function Set-LosslessScalingProfile {
 $script:StartedLosslessScaling = $false
 $script:StartedLosslessBridge  = $false
 
-function Find-LosslessBridgeExe {
-    param([Parameter(Mandatory)]$cfg)
-    $candidates = @(
-        (Join-Path $cfg.ToolsDir "LosslessBridge\LosslessBridge.exe"),
-        (Join-Path $cfg.GameDir "LosslessBridge.exe"),
-        (Join-Path $cfg.GameDir "_tools\LosslessBridge\LosslessBridge.exe")
-    )
-    foreach ($c in $candidates) {
-        if (Test-Path $c) { return $c }
-    }
-    return $null
-}
-
 function Start-LosslessScalingIfEnabled {
     param([Parameter(Mandatory)]$cfg)
     try {
         $mode = Get-FramerateModeSetting $cfg
         if ($mode -ne 'lossless') { return }
-
-        # Prefer native LosslessBridge module if available (100% headless, zero GUI, direct HWND hook)
-        $bridgeExe = Find-LosslessBridgeExe $cfg
-        if ($bridgeExe) {
-            $running = Get-Process -Name "LosslessBridge" -ErrorAction SilentlyContinue | Select-Object -First 1
-            if (-not $running) {
-                $bDir = Split-Path -Path $bridgeExe -Parent
-                $curFps = Get-LsfgFpsSetting $cfg
-                $curLsfgMode = Get-LsfgModeSetting $cfg
-                $curLsfgFlow = Get-LsfgFlowSetting $cfg
-                $bridgeArgs = @("--game-dir", $cfg.GameDir, "--fps", $curFps, "--mode", $curLsfgMode, "--flow", $curLsfgFlow)
-                $null = Start-Process -FilePath $bridgeExe -ArgumentList $bridgeArgs -WorkingDirectory $bDir -WindowStyle Hidden -PassThru
-                $script:StartedLosslessBridge = $true
-            }
-            return
-        }
 
         $running = Get-Process -Name "*LosslessScaling*" -ErrorAction SilentlyContinue | Select-Object -First 1
         if ($running) { return }
@@ -1573,31 +1547,30 @@ function Start-ModLoader {
                     $waitingForChapter = $false
                     $chapterActive = $true
                     if ($curMode -eq 'lossless') {
-                        # Pause 400ms for chapter window to render first frame & receive focus
-                        Start-Sleep -Milliseconds 400
+                        # Pause 500ms for chapter window to render first frame & receive focus
+                        Start-Sleep -Milliseconds 500
                         Start-LosslessScalingIfEnabled $cfg
 
-                        # If running official LosslessScaling.exe app, trigger hotkey
-                        $hasBridge = Find-LosslessBridgeExe $cfg
-                        if (-not $hasBridge) {
-                            try {
-                                $deltaruneProcs = @(Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.ProcessName -like '*ELTARUNE*' -and $_.MainWindowHandle -ne 0 })
-                                if ($deltaruneProcs.Count -gt 0) {
-                                    $wshell = New-Object -ComObject WScript.Shell
-                                    $wshell.AppActivate($deltaruneProcs[0].Id)
-                                    Start-Sleep -Milliseconds 150
-                                    Add-Type -AssemblyName System.Windows.Forms
-                                    [System.Windows.Forms.SendKeys]::SendWait("^%{s}")
-                                }
-                            } catch {}
-                        }
+                        # Give LSS 1000ms to initialize its tray icon and register hotkey
+                        Start-Sleep -Milliseconds 1000
+
+                        try {
+                            $deltaruneProcs = @(Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.ProcessName -like '*ELTARUNE*' -and $_.MainWindowHandle -ne 0 })
+                            if ($deltaruneProcs.Count -gt 0) {
+                                $wshell = New-Object -ComObject WScript.Shell
+                                $wshell.AppActivate($deltaruneProcs[0].Id)
+                                Start-Sleep -Milliseconds 250
+                                Add-Type -AssemblyName System.Windows.Forms
+                                [System.Windows.Forms.SendKeys]::SendWait("^%{s}")
+                            }
+                        } catch {}
                     }
                 }
             }
 
             # While in chapter, keep Lossless running
             if ($chapterActive -and $curMode -eq 'lossless') {
-                $runningLossless = Get-Process -Name "LosslessBridge", "*LosslessScaling*" -ErrorAction SilentlyContinue | Select-Object -First 1
+                $runningLossless = Get-Process -Name "*LosslessScaling*" -ErrorAction SilentlyContinue | Select-Object -First 1
                 if (-not $runningLossless) {
                     Start-LosslessScalingIfEnabled $cfg
                 }
@@ -1619,4 +1592,4 @@ function Start-ModLoader {
     }
 }
 
-Export-ModuleMember -Function Get-ModLoaderConfig, Backup-FileIfNeeded, Get-InstalledMods, Write-ModList, Restore-Vanilla, Apply-Mod, Clear-Signals, Read-Request, Set-Ready, Start-ModLoader, Get-ChapterSaveFiles, Write-ProfileList, Get-ProfileDir, Swap-InProfile, Swap-OutProfile, New-Profile, Remove-Profile, Read-ProfileCmd, Set-ProfileReady, Read-ModToolsCmd, Set-ModToolsResult, Get-SelectorVersion, Compare-SemVer, Test-DataWinPatched, Get-SelectorSettings, Set-SelectorSettings, Get-LatestSelectorRelease, Get-UtmtCli, Invoke-DataWinRepatch, Invoke-SelectorSelfUpdate, Invoke-UpdateCheck, Get-ThesiOverlaySetting, Set-ThesiOverlaySetting, Apply-ThesiOverlay, Get-Fps60PatchSetting, Set-Fps60PatchSetting, Get-GermanPatchSetting, Set-GermanPatchSetting, Get-MenuLangSetting, Set-MenuLangSetting, Apply-ChapterVariant, Get-ModMetadata, Set-ModMetadata, Get-GameBananaModInfo, Get-ModUpdates, Update-DeltaruneMod, Invoke-AutoImportFolder, Get-FramerateModeSetting, Set-FramerateModeSetting, Get-LsfgFpsSetting, Set-LsfgFpsSetting, Get-LsfgModeSetting, Set-LsfgModeSetting, Get-LsfgFlowSetting, Set-LsfgFlowSetting, Find-LosslessBridgeExe, Find-LosslessScalingExe, Set-LosslessScalingProfile, Start-LosslessScalingIfEnabled, Stop-LosslessScalingIfStarted, Invoke-LosslessScalingFirstRunCheck
+Export-ModuleMember -Function Get-ModLoaderConfig, Backup-FileIfNeeded, Get-InstalledMods, Write-ModList, Restore-Vanilla, Apply-Mod, Clear-Signals, Read-Request, Set-Ready, Start-ModLoader, Get-ChapterSaveFiles, Write-ProfileList, Get-ProfileDir, Swap-InProfile, Swap-OutProfile, New-Profile, Remove-Profile, Read-ProfileCmd, Set-ProfileReady, Read-ModToolsCmd, Set-ModToolsResult, Get-SelectorVersion, Compare-SemVer, Test-DataWinPatched, Get-SelectorSettings, Set-SelectorSettings, Get-LatestSelectorRelease, Get-UtmtCli, Invoke-DataWinRepatch, Invoke-SelectorSelfUpdate, Invoke-UpdateCheck, Get-ThesiOverlaySetting, Set-ThesiOverlaySetting, Apply-ThesiOverlay, Get-Fps60PatchSetting, Set-Fps60PatchSetting, Get-GermanPatchSetting, Set-GermanPatchSetting, Get-MenuLangSetting, Set-MenuLangSetting, Apply-ChapterVariant, Get-ModMetadata, Set-ModMetadata, Get-GameBananaModInfo, Get-ModUpdates, Update-DeltaruneMod, Invoke-AutoImportFolder, Get-FramerateModeSetting, Set-FramerateModeSetting, Get-LsfgFpsSetting, Set-LsfgFpsSetting, Get-LsfgModeSetting, Set-LsfgModeSetting, Get-LsfgFlowSetting, Set-LsfgFlowSetting, Find-LosslessScalingExe, Set-LosslessScalingProfile, Start-LosslessScalingIfEnabled, Stop-LosslessScalingIfStarted, Invoke-LosslessScalingFirstRunCheck
