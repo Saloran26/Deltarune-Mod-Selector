@@ -664,12 +664,38 @@ function Set-LosslessScalingProfile {
 }
 
 $script:StartedLosslessScaling = $false
+$script:StartedLosslessBridge  = $false
+
+function Find-LosslessBridgeExe {
+    param([Parameter(Mandatory)]$cfg)
+    $candidates = @(
+        (Join-Path $cfg.ToolsDir "LosslessBridge\LosslessBridge.exe"),
+        (Join-Path $cfg.GameDir "LosslessBridge.exe"),
+        (Join-Path $cfg.GameDir "_tools\LosslessBridge\LosslessBridge.exe")
+    )
+    foreach ($c in $candidates) {
+        if (Test-Path $c) { return $c }
+    }
+    return $null
+}
 
 function Start-LosslessScalingIfEnabled {
     param([Parameter(Mandatory)]$cfg)
     try {
         $mode = Get-FramerateModeSetting $cfg
         if ($mode -ne 'lossless') { return }
+
+        # Prefer native LosslessBridge module if available (100% headless, zero GUI, direct HWND hook)
+        $bridgeExe = Find-LosslessBridgeExe $cfg
+        if ($bridgeExe) {
+            $running = Get-Process -Name "LosslessBridge" -ErrorAction SilentlyContinue | Select-Object -First 1
+            if (-not $running) {
+                $bDir = Split-Path -Path $bridgeExe -Parent
+                $null = Start-Process -FilePath $bridgeExe -ArgumentList @("--game-dir", $cfg.GameDir) -WorkingDirectory $bDir -WindowStyle Hidden -PassThru
+                $script:StartedLosslessBridge = $true
+            }
+            return
+        }
 
         $running = Get-Process -Name "*LosslessScaling*" -ErrorAction SilentlyContinue | Select-Object -First 1
         if ($running) { return }
@@ -687,6 +713,12 @@ function Start-LosslessScalingIfEnabled {
 }
 
 function Stop-LosslessScalingIfStarted {
+    if ($script:StartedLosslessBridge) {
+        try {
+            Get-Process -Name "LosslessBridge" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+        } catch {}
+        $script:StartedLosslessBridge = $false
+    }
     if ($script:StartedLosslessScaling) {
         try {
             Get-Process -Name "*LosslessScaling*" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
@@ -1521,31 +1553,39 @@ function Start-ModLoader {
                     $lastSyncedMode = $curLsfgMode
                     $lastSyncedFlow = $curLsfgFlow
                 }
-                if (-not (Get-Process -Name "*LosslessScaling*" -ErrorAction SilentlyContinue)) {
+                $runningLossless = Get-Process -Name "LosslessBridge", "*LosslessScaling*" -ErrorAction SilentlyContinue | Select-Object -First 1
+                if (-not $runningLossless) {
                     Start-LosslessScalingIfEnabled $cfg
                 }
             }
 
-            # Automatically hook Lossless Scaling ~3s after chapter start
+            # Automatically hook Lossless Scaling:
+            # If native LosslessBridge is running, it hooks automatically via Win32 API without sending any simulated hotkey!
+            # Only use SendKeys fallback if running official LosslessScaling.exe!
             if (-not $chapterHookDone -and $chapterHookTime -and [DateTime]::UtcNow -ge $chapterHookTime) {
                 $curMode = Get-FramerateModeSetting $cfg
                 if ($curMode -eq 'lossless') {
-                    try {
-                        $deltaruneProcs = @(Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.ProcessName -like '*ELTARUNE*' -and $_.MainWindowHandle -ne 0 })
-                        if ($deltaruneProcs.Count -gt 0) {
-                            if (-not (Get-Process -Name "*LosslessScaling*" -ErrorAction SilentlyContinue)) {
-                                Start-LosslessScalingIfEnabled $cfg
-                                Start-Sleep -Milliseconds 600
+                    $hasBridge = Get-Process -Name "LosslessBridge" -ErrorAction SilentlyContinue | Select-Object -First 1
+                    if ($hasBridge) {
+                        $chapterHookDone = $true
+                    } else {
+                        try {
+                            $deltaruneProcs = @(Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.ProcessName -like '*ELTARUNE*' -and $_.MainWindowHandle -ne 0 })
+                            if ($deltaruneProcs.Count -gt 0) {
+                                if (-not (Get-Process -Name "*LosslessScaling*" -ErrorAction SilentlyContinue)) {
+                                    Start-LosslessScalingIfEnabled $cfg
+                                    Start-Sleep -Milliseconds 600
+                                }
+                                $wshell = New-Object -ComObject WScript.Shell
+                                $wshell.AppActivate($deltaruneProcs[0].Id)
+                                Start-Sleep -Milliseconds 150
+                                Add-Type -AssemblyName System.Windows.Forms
+                                [System.Windows.Forms.SendKeys]::SendWait("^%{s}")
+                                $chapterHookDone = $true
                             }
-                            $wshell = New-Object -ComObject WScript.Shell
-                            $wshell.AppActivate($deltaruneProcs[0].Id)
-                            Start-Sleep -Milliseconds 150
-                            Add-Type -AssemblyName System.Windows.Forms
-                            [System.Windows.Forms.SendKeys]::SendWait("^%{s}")
+                        } catch {
                             $chapterHookDone = $true
                         }
-                    } catch {
-                        $chapterHookDone = $true
                     }
                 } else {
                     $chapterHookDone = $true
@@ -1568,4 +1608,4 @@ function Start-ModLoader {
     }
 }
 
-Export-ModuleMember -Function Get-ModLoaderConfig, Backup-FileIfNeeded, Get-InstalledMods, Write-ModList, Restore-Vanilla, Apply-Mod, Clear-Signals, Read-Request, Set-Ready, Start-ModLoader, Get-ChapterSaveFiles, Write-ProfileList, Get-ProfileDir, Swap-InProfile, Swap-OutProfile, New-Profile, Remove-Profile, Read-ProfileCmd, Set-ProfileReady, Read-ModToolsCmd, Set-ModToolsResult, Get-SelectorVersion, Compare-SemVer, Test-DataWinPatched, Get-SelectorSettings, Set-SelectorSettings, Get-LatestSelectorRelease, Get-UtmtCli, Invoke-DataWinRepatch, Invoke-SelectorSelfUpdate, Invoke-UpdateCheck, Get-ThesiOverlaySetting, Set-ThesiOverlaySetting, Apply-ThesiOverlay, Get-Fps60PatchSetting, Set-Fps60PatchSetting, Get-GermanPatchSetting, Set-GermanPatchSetting, Get-MenuLangSetting, Set-MenuLangSetting, Apply-ChapterVariant, Get-ModMetadata, Set-ModMetadata, Get-GameBananaModInfo, Get-ModUpdates, Update-DeltaruneMod, Invoke-AutoImportFolder, Get-FramerateModeSetting, Set-FramerateModeSetting, Get-LsfgFpsSetting, Set-LsfgFpsSetting, Get-LsfgModeSetting, Set-LsfgModeSetting, Get-LsfgFlowSetting, Set-LsfgFlowSetting, Find-LosslessScalingExe, Set-LosslessScalingProfile, Start-LosslessScalingIfEnabled, Stop-LosslessScalingIfStarted, Invoke-LosslessScalingFirstRunCheck
+Export-ModuleMember -Function Get-ModLoaderConfig, Backup-FileIfNeeded, Get-InstalledMods, Write-ModList, Restore-Vanilla, Apply-Mod, Clear-Signals, Read-Request, Set-Ready, Start-ModLoader, Get-ChapterSaveFiles, Write-ProfileList, Get-ProfileDir, Swap-InProfile, Swap-OutProfile, New-Profile, Remove-Profile, Read-ProfileCmd, Set-ProfileReady, Read-ModToolsCmd, Set-ModToolsResult, Get-SelectorVersion, Compare-SemVer, Test-DataWinPatched, Get-SelectorSettings, Set-SelectorSettings, Get-LatestSelectorRelease, Get-UtmtCli, Invoke-DataWinRepatch, Invoke-SelectorSelfUpdate, Invoke-UpdateCheck, Get-ThesiOverlaySetting, Set-ThesiOverlaySetting, Apply-ThesiOverlay, Get-Fps60PatchSetting, Set-Fps60PatchSetting, Get-GermanPatchSetting, Set-GermanPatchSetting, Get-MenuLangSetting, Set-MenuLangSetting, Apply-ChapterVariant, Get-ModMetadata, Set-ModMetadata, Get-GameBananaModInfo, Get-ModUpdates, Update-DeltaruneMod, Invoke-AutoImportFolder, Get-FramerateModeSetting, Set-FramerateModeSetting, Get-LsfgFpsSetting, Set-LsfgFpsSetting, Get-LsfgModeSetting, Set-LsfgModeSetting, Get-LsfgFlowSetting, Set-LsfgFlowSetting, Find-LosslessBridgeExe, Find-LosslessScalingExe, Set-LosslessScalingProfile, Start-LosslessScalingIfEnabled, Stop-LosslessScalingIfStarted, Invoke-LosslessScalingFirstRunCheck
