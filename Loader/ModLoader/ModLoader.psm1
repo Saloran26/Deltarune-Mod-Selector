@@ -2,6 +2,82 @@
 # latest GitHub release tag. Bump it whenever the shipped files change.
 $script:SELECTOR_VERSION = '1.5.1'
 
+if (-not ([System.Management.Automation.PSTypeName]'WinHelper').Type) {
+    $winHelperDef = @'
+using System;
+using System.Text;
+using System.Runtime.InteropServices;
+
+public class WinHelper {
+    [DllImport("user32.dll")]
+    public static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
+    public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+
+    [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Auto)]
+    public static extern int GetWindowText(IntPtr hWnd, StringBuilder lpString, int nMaxCount);
+
+    [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Auto)]
+    public static extern int GetClassName(IntPtr hWnd, StringBuilder lpClassName, int nMaxCount);
+
+    [DllImport("user32.dll")]
+    public static extern bool IsWindowVisible(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    public static extern bool SetForegroundWindow(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+
+    [DllImport("user32.dll")]
+    public static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, UIntPtr dwExtraInfo);
+
+    public const int SW_RESTORE = 9;
+    public const byte VK_CONTROL = 0x11;
+    public const byte VK_MENU    = 0x12; // Alt
+    public const byte VK_S       = 0x53; // 'S'
+    public const uint KEYEVENTF_KEYUP = 0x0002;
+
+    public static IntPtr FindDeltaruneWindow() {
+        IntPtr found = IntPtr.Zero;
+        EnumWindows((hWnd, lParam) => {
+            if (!IsWindowVisible(hWnd)) return true;
+            StringBuilder sbTitle = new StringBuilder(256);
+            GetWindowText(hWnd, sbTitle, 256);
+            string title = sbTitle.ToString();
+
+            StringBuilder sbClass = new StringBuilder(256);
+            GetClassName(hWnd, sbClass, 256);
+            string cls = sbClass.ToString();
+
+            if (cls.Contains("YYGameMakerYY") || title.IndexOf("DELTARUNE", StringComparison.OrdinalIgnoreCase) >= 0) {
+                found = hWnd;
+                return false;
+            }
+            return true;
+        }, IntPtr.Zero);
+        return found;
+    }
+
+    public static bool TriggerLssHotkey(IntPtr hWnd) {
+        if (hWnd != IntPtr.Zero) {
+            ShowWindow(hWnd, SW_RESTORE);
+            SetForegroundWindow(hWnd);
+            System.Threading.Thread.Sleep(250);
+        }
+        keybd_event(VK_CONTROL, 0, 0, UIntPtr.Zero);
+        keybd_event(VK_MENU, 0, 0, UIntPtr.Zero);
+        keybd_event(VK_S, 0, 0, UIntPtr.Zero);
+        System.Threading.Thread.Sleep(50);
+        keybd_event(VK_S, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
+        keybd_event(VK_MENU, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
+        keybd_event(VK_CONTROL, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
+        return true;
+    }
+}
+'@
+    Add-Type -TypeDefinition $winHelperDef -ErrorAction SilentlyContinue
+}
+
 function Get-ModLoaderConfig {
     param([Parameter(Mandatory)][string]$GameDir)
     $signal = Join-Path $env:LOCALAPPDATA "DELTARUNE"
@@ -591,6 +667,7 @@ function Set-LosslessScalingProfile {
         $lssDir = Join-Path $env:LOCALAPPDATA "Lossless Scaling"
         if (-not (Test-Path $lssDir)) { New-Item -ItemType Directory -Path $lssDir -Force | Out-Null }
         $lssConfig = Join-Path $lssDir "Settings.xml"
+        $xml = $null
         if (Test-Path $lssConfig) {
             try {
                 [xml]$xml = Get-Content -LiteralPath $lssConfig -Raw
@@ -609,6 +686,17 @@ function Set-LosslessScalingProfile {
 "@
         }
 
+        $settingsNode = $xml.Settings
+
+        function _Set-LssSubnode([System.Xml.XmlElement]$parent, [string]$name, [string]$val) {
+            $sub = $parent[$name]
+            if (-not $sub) {
+                $sub = $parent.OwnerDocument.CreateElement($name)
+                [void]$parent.AppendChild($sub)
+            }
+            $sub.InnerText = $val
+        }
+
         _Set-LssSubnode $settingsNode "MinimizeToTray" "true"
         _Set-LssSubnode $settingsNode "CloseToTray" "true"
         _Set-LssSubnode $settingsNode "Hotkey" "S"
@@ -620,25 +708,26 @@ function Set-LosslessScalingProfile {
             [void]$settingsNode.AppendChild($profilesNode)
         }
 
+        # Crucial: Disable FrameGeneration and AutoScale on "Standard" profile so LSS NEVER hooks any other app!
+        $standardProfile = $profilesNode.Profile | Where-Object { $_.Title -eq "Standard" } | Select-Object -First 1
+        if ($standardProfile) {
+            _Set-LssSubnode $standardProfile "AutoScale" "false"
+            _Set-LssSubnode $standardProfile "AutoScaleDelay" "0"
+            _Set-LssSubnode $standardProfile "FrameGeneration" "Off"
+            _Set-LssSubnode $standardProfile "ScalingType" "Off"
+        }
+
         $deltaruneProfile = $profilesNode.Profile | Where-Object { $_.Title -eq "DELTARUNE" -or $_.Path -like "*DELTARUNE*" -or $_.Filter -eq "DELTARUNE.exe" } | Select-Object -First 1
         if (-not $deltaruneProfile) {
             $deltaruneProfile = $xml.CreateElement("Profile")
             [void]$profilesNode.AppendChild($deltaruneProfile)
         }
 
-        function _Set-LssSubnode([System.Xml.XmlElement]$parent, [string]$name, [string]$val) {
-            $sub = $parent[$name]
-            if (-not $sub) {
-                $sub = $parent.OwnerDocument.CreateElement($name)
-                [void]$parent.AppendChild($sub)
-            }
-            $sub.InnerText = $val
-        }
-
         _Set-LssSubnode $deltaruneProfile "Title" "DELTARUNE"
         _Set-LssSubnode $deltaruneProfile "Path" "DELTARUNE.exe;*DELTARUNE*"
-        _Set-LssSubnode $deltaruneProfile "AutoScale" "true"
-        _Set-LssSubnode $deltaruneProfile "AutoScaleDelay" "3"
+        # We hook deterministically via hotkey once DELTARUNE window is in foreground -> AutoScale must be false!
+        _Set-LssSubnode $deltaruneProfile "AutoScale" "false"
+        _Set-LssSubnode $deltaruneProfile "AutoScaleDelay" "0"
         _Set-LssSubnode $deltaruneProfile "ScalingMode" "Auto"
         _Set-LssSubnode $deltaruneProfile "ScalingFitMode" "AspectRatio"
         _Set-LssSubnode $deltaruneProfile "ScalingType" "Off"
@@ -676,7 +765,10 @@ function Start-LosslessScalingIfEnabled {
         if ($mode -ne 'lossless') { return }
 
         $running = Get-Process -Name "*LosslessScaling*" -ErrorAction SilentlyContinue | Select-Object -First 1
-        if ($running) { return }
+        if ($running) {
+            $script:StartedLosslessScaling = $true
+            return
+        }
 
         $lssExe = Find-LosslessScalingExe $cfg
         if (-not $lssExe) { return }
@@ -691,18 +783,14 @@ function Start-LosslessScalingIfEnabled {
 }
 
 function Stop-LosslessScalingIfStarted {
-    if ($script:StartedLosslessBridge) {
-        try {
-            Get-Process -Name "LosslessBridge" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
-        } catch {}
-        $script:StartedLosslessBridge = $false
-    }
-    if ($script:StartedLosslessScaling) {
-        try {
-            Get-Process -Name "*LosslessScaling*" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
-        } catch {}
-        $script:StartedLosslessScaling = $false
-    }
+    try {
+        Get-Process -Name "LosslessBridge" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+    } catch {}
+    try {
+        Get-Process -Name "*LosslessScaling*" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+    } catch {}
+    $script:StartedLosslessBridge  = $false
+    $script:StartedLosslessScaling = $false
 }
 
 function Invoke-LosslessScalingFirstRunCheck {
@@ -1435,11 +1523,10 @@ function Start-ModLoader {
     $lastSyncedFps   = Get-LsfgFpsSetting $cfg
     $lastSyncedMode  = Get-LsfgModeSetting $cfg
     $lastSyncedFlow  = Get-LsfgFlowSetting $cfg
-    $chapterActive   = $false
+    $chapterActive     = $false
     $waitingForChapter = $false
-    $chapterTimeout  = [DateTime]::MinValue
-    $readyFile       = Join-Path $cfg.SignalDir "chapter_ready.txt"
-    if (Test-Path $readyFile) { Remove-Item $readyFile -Force -ErrorAction SilentlyContinue }
+    $chapterLaunchTime = [DateTime]::MinValue
+    $hookedLss         = $false
     # Do not start Lossless Scaling in the Hub menu
     Stop-LosslessScalingIfStarted
     try {
@@ -1456,13 +1543,14 @@ function Start-ModLoader {
                 }
                 Write-ProfileList $cfg
                 Set-Ready $cfg
-                # Reset goneCount so chapter transitions (~game_change) have plenty of time without killing the loader
+                # Reset goneCount so chapter transitions have plenty of time without killing the loader
                 $goneCount = 0
                 if ($req.Chapter -gt 0) {
                     $waitingForChapter = $true
                     $chapterActive = $false
-                    $chapterTimeout = [DateTime]::UtcNow.AddSeconds(15)
-                    if (Test-Path $readyFile) { Remove-Item $readyFile -Force -ErrorAction SilentlyContinue }
+                    $chapterLaunchTime = [DateTime]::UtcNow
+                    $hookedLss = $false
+                    # Cleanly stop any previous LSS instance so DXGI swapchains are not blocked
                     Stop-LosslessScalingIfStarted
                 }
             }
@@ -1514,7 +1602,7 @@ function Start-ModLoader {
                         if ($lssExe) {
                             Set-LosslessScalingProfile $cfg
                             Set-FramerateModeSetting $cfg -Mode 'lossless'
-                            Set-ModToolsResult $cfg "Lossless Scaling eingerichtet!" "Profil 'DELTARUNE' (LSFG 2.3 Quality) aktiv." "Framerate-Modus: [Lossless Scaling] aktiviert."
+                            Set-ModToolsResult $cfg "Lossless Scaling eingerichtet!" "Profil 'DELTARUNE' (LSFG 3) aktiv." "Framerate-Modus: [Lossless Scaling] aktiviert."
                         } else {
                             Set-ModToolsResult $cfg "Lossless Scaling nicht gefunden!" "Bitte ueber Steam installieren." "Danach hier erneut suchen lassen."
                         }
@@ -1539,31 +1627,24 @@ function Start-ModLoader {
             }
 
             # Chapter loaded detection:
-            # Only start and hook Lossless Scaling after chapter is loaded!
+            # Wait ~3.5 seconds after chapter launch for GameMaker to create and show the new window,
+            # then start Lossless Scaling headless and send Ctrl + Alt + S to DELTARUNE!
             if ($waitingForChapter) {
-                $isReady = Test-Path $readyFile
-                $timedOut = ([DateTime]::UtcNow -ge $chapterTimeout)
-                if ($isReady -or $timedOut) {
-                    $waitingForChapter = $false
-                    $chapterActive = $true
-                    if ($curMode -eq 'lossless') {
-                        # Pause 500ms for chapter window to render first frame & receive focus
-                        Start-Sleep -Milliseconds 500
-                        Start-LosslessScalingIfEnabled $cfg
-
-                        # Give LSS 1000ms to initialize its tray icon and register hotkey
-                        Start-Sleep -Milliseconds 1000
-
-                        try {
-                            $deltaruneProcs = @(Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.ProcessName -like '*ELTARUNE*' -and $_.MainWindowHandle -ne 0 })
-                            if ($deltaruneProcs.Count -gt 0) {
-                                $wshell = New-Object -ComObject WScript.Shell
-                                $wshell.AppActivate($deltaruneProcs[0].Id)
-                                Start-Sleep -Milliseconds 250
-                                Add-Type -AssemblyName System.Windows.Forms
-                                [System.Windows.Forms.SendKeys]::SendWait("^%{s}")
+                $elapsedSec = ([DateTime]::UtcNow - $chapterLaunchTime).TotalSeconds
+                if ($elapsedSec -ge 3.5) {
+                    $hwnd = [WinHelper]::FindDeltaruneWindow()
+                    if ($hwnd -ne [IntPtr]::Zero -or $elapsedSec -ge 8.0) {
+                        $waitingForChapter = $false
+                        $chapterActive = $true
+                        if ($curMode -eq 'lossless') {
+                            Start-LosslessScalingIfEnabled $cfg
+                            Start-Sleep -Milliseconds 1200
+                            $targetHwnd = [WinHelper]::FindDeltaruneWindow()
+                            if ($targetHwnd -ne [IntPtr]::Zero) {
+                                [WinHelper]::TriggerLssHotkey($targetHwnd)
+                                $hookedLss = $true
                             }
-                        } catch {}
+                        }
                     }
                 }
             }
@@ -1573,13 +1654,27 @@ function Start-ModLoader {
                 $runningLossless = Get-Process -Name "*LosslessScaling*" -ErrorAction SilentlyContinue | Select-Object -First 1
                 if (-not $runningLossless) {
                     Start-LosslessScalingIfEnabled $cfg
+                    Start-Sleep -Milliseconds 1000
+                    $targetHwnd = [WinHelper]::FindDeltaruneWindow()
+                    if ($targetHwnd -ne [IntPtr]::Zero) {
+                        [WinHelper]::TriggerLssHotkey($targetHwnd)
+                    }
                 }
             }
 
             $alive = @(Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.ProcessName -like '*ELTARUNE*' })
-            if ($alive.Count -gt 0) { $sawGame = $true; $goneCount = 0 }
-            elseif ($sawGame) { $goneCount++ }
-            if ($sawGame -and $goneCount -ge 120) { break }  # ~18s ohne Prozess = echtes Beenden (uebersteht Kapitelwechsel problemlos)
+            if ($alive.Count -gt 0) {
+                $sawGame = $true
+                $goneCount = 0
+            } elseif ($sawGame) {
+                $goneCount++
+                # If DELTARUNE was closed (e.g. Alt+F4), immediately kill Lossless Scaling!
+                # Do not wait 18 seconds - killing it within 300ms guarantees it NEVER latches onto the browser or desktop!
+                if ($goneCount -ge 2) {
+                    Stop-LosslessScalingIfStarted
+                }
+                if ($goneCount -ge 20) { break }  # ~3s without process = game closed, exit loader
+            }
 
             Start-Sleep -Milliseconds 150
         }

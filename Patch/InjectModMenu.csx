@@ -353,7 +353,7 @@ mm_b_confirm  = mm_ps ? ""Cross""    : ""A"";
 mm_b_back     = mm_ps ? ""Circle""   : ""B"";
 mm_b_delete   = mm_ps ? ""Triangle"" : ""Y"";
 mm_b_toggle   = mm_ps ? ""Square""   : ""X"";
-mm_b_settings = mm_ps ? ""Triangle / Options"" : ""Y / Menu"";
+mm_b_settings = mm_ps ? ""Options""  : ""Menu"";
 
 mm_names = [""Vanilla""];
 
@@ -570,11 +570,19 @@ if (mm_state == ""select"")
     }
 
     var _open_settings = (keyboard_check_pressed(ord(""S"")) && mm_secret_str != ""the"") || keyboard_check_pressed(ord(""C"")) || keyboard_check_pressed(vk_tab) || button3_p();
-    if (!_open_settings && instance_exists(obj_gamecontroller))
+    if (!_open_settings)
     {
-        var _gps = obj_gamecontroller.gamepad_id;
-        if (gamepad_button_check_pressed(_gps, gp_face4) || gamepad_button_check_pressed(_gps, gp_start) || gamepad_button_check_pressed(_gps, gp_select) || gamepad_button_check_pressed(_gps, gp_shoulderl))
-            _open_settings = true;
+        for (var _gpi = 0; _gpi < 8; _gpi++)
+        {
+            if (gamepad_is_connected(_gpi))
+            {
+                if (gamepad_button_check_pressed(_gpi, gp_start) || gamepad_button_check_pressed(_gpi, gp_face4) || gamepad_button_check_pressed(_gpi, gp_select) || gamepad_button_check_pressed(_gpi, gp_shoulderl))
+                {
+                    _open_settings = true;
+                    break;
+                }
+            }
+        }
     }
     if (_open_settings)
     {
@@ -1292,7 +1300,8 @@ var _spr_confirm  = asset_get_index(mm_ps ? ""spr_btn_ps4_cross""    : ""spr_btn
 var _spr_back     = asset_get_index(mm_ps ? ""spr_btn_ps4_circle""   : ""spr_btn_xbox_b"");
 var _spr_toggle   = asset_get_index(mm_ps ? ""spr_btn_ps4_square""   : ""spr_btn_xbox_x"");
 var _spr_delete   = asset_get_index(mm_ps ? ""spr_btn_ps4_triangle"" : ""spr_btn_xbox_y"");
-var _spr_settings = _spr_delete;
+var _spr_settings = asset_get_index(mm_ps ? ""spr_btn_ps4_options""  : ""spr_btn_xbox_menu"");
+if (_spr_settings < 0) _spr_settings = _spr_delete;
 
 var _draw_bar2 = function(_bx, _by, _k1, _s1, _t1, _k2, _s2, _t2)
 {
