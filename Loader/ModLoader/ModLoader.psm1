@@ -1456,13 +1456,18 @@ function Start-ModLoader {
     # ob ueberhaupt noch ein Deltarune-Prozess laeuft. Erst wenn ~3s lang keiner
     # mehr da ist (echtes Beenden), raeumen wir auf. So ueberlebt der Loader die
     # Kapitelwechsel und bedient auch weitere Mod-Anfragen.
-    $sawGame = $false
-    $goneCount = 0
-    $lastSyncedFps  = Get-LsfgFpsSetting $cfg
-    $lastSyncedMode = Get-LsfgModeSetting $cfg
-    $lastSyncedFlow = Get-LsfgFlowSetting $cfg
-    $chapterHookTime = $null
-    $chapterHookDone = $true
+    $sawGame         = $false
+    $goneCount       = 0
+    $lastSyncedFps   = Get-LsfgFpsSetting $cfg
+    $lastSyncedMode  = Get-LsfgModeSetting $cfg
+    $lastSyncedFlow  = Get-LsfgFlowSetting $cfg
+    $chapterActive   = $false
+    $waitingForChapter = $false
+    $chapterTimeout  = [DateTime]::MinValue
+    $readyFile       = Join-Path $cfg.SignalDir "chapter_ready.txt"
+    if (Test-Path $readyFile) { Remove-Item $readyFile -Force -ErrorAction SilentlyContinue }
+    # Do not start Lossless Scaling in the Hub menu
+    Stop-LosslessScalingIfStarted
     try {
         while ($true) {
             $req = Read-Request $cfg
@@ -1479,10 +1484,12 @@ function Start-ModLoader {
                 Set-Ready $cfg
                 # Reset goneCount so chapter transitions (~game_change) have plenty of time without killing the loader
                 $goneCount = 0
-                # Schedule Lossless Scaling hook ~3s after chapter launch
                 if ($req.Chapter -gt 0) {
-                    $chapterHookTime = [DateTime]::UtcNow.AddSeconds(3)
-                    $chapterHookDone = $false
+                    $waitingForChapter = $true
+                    $chapterActive = $false
+                    $chapterTimeout = [DateTime]::UtcNow.AddSeconds(15)
+                    if (Test-Path $readyFile) { Remove-Item $readyFile -Force -ErrorAction SilentlyContinue }
+                    Stop-LosslessScalingIfStarted
                 }
             }
 
@@ -1533,7 +1540,6 @@ function Start-ModLoader {
                         if ($lssExe) {
                             Set-LosslessScalingProfile $cfg
                             Set-FramerateModeSetting $cfg -Mode 'lossless'
-                            Start-LosslessScalingIfEnabled $cfg
                             Set-ModToolsResult $cfg "Lossless Scaling eingerichtet!" "Profil 'DELTARUNE' (LSFG 2.3 Quality) aktiv." "Framerate-Modus: [Lossless Scaling] aktiviert."
                         } else {
                             Set-ModToolsResult $cfg "Lossless Scaling nicht gefunden!" "Bitte ueber Steam installieren." "Danach hier erneut suchen lassen."
@@ -1544,8 +1550,7 @@ function Start-ModLoader {
                 }
             }
 
-            # If in-game menu changed target FPS or mode, update profile and start LSS if needed
-            # If in-game menu changed target FPS, mode, or flow, update profile and start LSS if needed
+            # If in-game menu changed target FPS or mode, update profile
             $curMode     = Get-FramerateModeSetting $cfg
             $curFps      = Get-LsfgFpsSetting $cfg
             $curLsfgMode = Get-LsfgModeSetting $cfg
@@ -1557,42 +1562,44 @@ function Start-ModLoader {
                     $lastSyncedMode = $curLsfgMode
                     $lastSyncedFlow = $curLsfgFlow
                 }
-                $runningLossless = Get-Process -Name "LosslessBridge", "*LosslessScaling*" -ErrorAction SilentlyContinue | Select-Object -First 1
-                if (-not $runningLossless) {
-                    Start-LosslessScalingIfEnabled $cfg
+            }
+
+            # Chapter loaded detection:
+            # Only start and hook Lossless Scaling after chapter is loaded!
+            if ($waitingForChapter) {
+                $isReady = Test-Path $readyFile
+                $timedOut = ([DateTime]::UtcNow -ge $chapterTimeout)
+                if ($isReady -or $timedOut) {
+                    $waitingForChapter = $false
+                    $chapterActive = $true
+                    if ($curMode -eq 'lossless') {
+                        # Pause 400ms for chapter window to render first frame & receive focus
+                        Start-Sleep -Milliseconds 400
+                        Start-LosslessScalingIfEnabled $cfg
+
+                        # If running official LosslessScaling.exe app, trigger hotkey
+                        $hasBridge = Find-LosslessBridgeExe $cfg
+                        if (-not $hasBridge) {
+                            try {
+                                $deltaruneProcs = @(Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.ProcessName -like '*ELTARUNE*' -and $_.MainWindowHandle -ne 0 })
+                                if ($deltaruneProcs.Count -gt 0) {
+                                    $wshell = New-Object -ComObject WScript.Shell
+                                    $wshell.AppActivate($deltaruneProcs[0].Id)
+                                    Start-Sleep -Milliseconds 150
+                                    Add-Type -AssemblyName System.Windows.Forms
+                                    [System.Windows.Forms.SendKeys]::SendWait("^%{s}")
+                                }
+                            } catch {}
+                        }
+                    }
                 }
             }
 
-            # Automatically hook Lossless Scaling:
-            # If native LosslessBridge is running, it hooks automatically via Win32 API without sending any simulated hotkey!
-            # Only use SendKeys fallback if running official LosslessScaling.exe!
-            if (-not $chapterHookDone -and $chapterHookTime -and [DateTime]::UtcNow -ge $chapterHookTime) {
-                $curMode = Get-FramerateModeSetting $cfg
-                if ($curMode -eq 'lossless') {
-                    $hasBridge = Get-Process -Name "LosslessBridge" -ErrorAction SilentlyContinue | Select-Object -First 1
-                    if ($hasBridge) {
-                        $chapterHookDone = $true
-                    } else {
-                        try {
-                            $deltaruneProcs = @(Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.ProcessName -like '*ELTARUNE*' -and $_.MainWindowHandle -ne 0 })
-                            if ($deltaruneProcs.Count -gt 0) {
-                                if (-not (Get-Process -Name "*LosslessScaling*" -ErrorAction SilentlyContinue)) {
-                                    Start-LosslessScalingIfEnabled $cfg
-                                    Start-Sleep -Milliseconds 600
-                                }
-                                $wshell = New-Object -ComObject WScript.Shell
-                                $wshell.AppActivate($deltaruneProcs[0].Id)
-                                Start-Sleep -Milliseconds 150
-                                Add-Type -AssemblyName System.Windows.Forms
-                                [System.Windows.Forms.SendKeys]::SendWait("^%{s}")
-                                $chapterHookDone = $true
-                            }
-                        } catch {
-                            $chapterHookDone = $true
-                        }
-                    }
-                } else {
-                    $chapterHookDone = $true
+            # While in chapter, keep Lossless running
+            if ($chapterActive -and $curMode -eq 'lossless') {
+                $runningLossless = Get-Process -Name "LosslessBridge", "*LosslessScaling*" -ErrorAction SilentlyContinue | Select-Object -First 1
+                if (-not $runningLossless) {
+                    Start-LosslessScalingIfEnabled $cfg
                 }
             }
 

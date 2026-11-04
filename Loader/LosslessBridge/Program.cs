@@ -89,6 +89,12 @@ class Program
     [DllImport("user32.dll")]
     static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
 
+    [DllImport("user32.dll")]
+    static extern IntPtr GetForegroundWindow();
+
+    [DllImport("user32.dll")]
+    static extern bool SetForegroundWindow(IntPtr hWnd);
+
     [StructLayout(LayoutKind.Sequential)]
     public struct RECT
     {
@@ -110,8 +116,8 @@ class Program
     static string _logFile = "";
     static bool _initialized = false;
     static IntPtr _currentHwnd = IntPtr.Zero;
-    static int _currentStatus = 0;
-    static float _lastGeneratedFps = 0.0f;
+    static int _currentStatus = 0; // 0=Disabled, 1=TempDisabled, 2=Enabled, 3=Countdown
+    static DateTime _lastActivateTime = DateTime.MinValue;
 
     static void Log(string msg)
     {
@@ -126,9 +132,7 @@ class Program
     static void OnStatus(int status, IntPtr hwnd, int arg2, int arg3, int arg4, int arg5, bool arg6, float arg7, int arg8)
     {
         _currentStatus = status;
-        _lastGeneratedFps = arg7;
 
-        // status: 0=Disabled, 1=TempDisabled, 2=Enabled, 3=Countdown
         string statusStr = status switch
         {
             0 => "Disabled",
@@ -137,7 +141,7 @@ class Program
             3 => "Countdown",
             _ => status.ToString()
         };
-        Log($"[STATUS] {statusStr} (HWND=0x{hwnd:X}, ErrorCode={arg2}, FPS={arg7:F1}, a3={arg3}, a4={arg4}, a5={arg5}, a6={arg6}, a8={arg8})");
+        Log($"[STATUS] {statusStr} (HWND=0x{hwnd:X}, Target={arg2}x{arg3}, Src={arg4}x{arg5}, Foreground={arg6})");
     }
 
     static string ReadSignal(string filename, string gameDir, string defaultValue)
@@ -188,7 +192,6 @@ class Program
                 return c;
         }
 
-        // Search Steam library folders via libraryfolders.vdf
         string steamConfig = @"C:\Program Files (x86)\Steam\steamapps\libraryfolders.vdf";
         if (File.Exists(steamConfig))
         {
@@ -217,7 +220,6 @@ class Program
         {
             if (!IsWindow(hwnd) || !IsWindowVisible(hwnd)) return true;
 
-            // Make sure the window has a valid drawing area (avoid dummy/hidden windows)
             if (GetClientRect(hwnd, out RECT rc))
             {
                 int w = rc.Right - rc.Left;
@@ -239,7 +241,6 @@ class Program
                     GetClassName(hwnd, sbClass, 256);
                     string cls = sbClass.ToString();
 
-                    // GameMaker windows typically have class YYGameMakerYY or title DELTARUNE
                     if (title.IndexOf("DELTARUNE", StringComparison.OrdinalIgnoreCase) >= 0 || cls == "YYGameMakerYY")
                     {
                         found = hwnd;
@@ -269,15 +270,36 @@ class Program
         return false;
     }
 
+    static bool TryActivate(IntPtr hwnd)
+    {
+        try
+        {
+            _lastActivateTime = DateTime.UtcNow;
+            IntPtr fg = GetForegroundWindow();
+            if (fg != hwnd)
+            {
+                SetForegroundWindow(hwnd);
+                Thread.Sleep(100);
+            }
+            bool ok = Activate(hwnd);
+            Log($"Activate(0x{hwnd:X}) called -> result: {ok}");
+            return ok;
+        }
+        catch (Exception ex)
+        {
+            Log($"Activate exception: {ex.Message}");
+            return false;
+        }
+    }
+
     [STAThread]
     static int Main(string[] args)
     {
         string gameDir = AppDomain.CurrentDomain.BaseDirectory;
         string customDll = "";
-        string fpsArg = "120";
+        string fpsArg = "240";
         string modeArg = "balanced";
         string flowArg = "100";
-        bool verbose = true;
 
         for (int i = 0; i < args.Length; i++)
         {
@@ -287,11 +309,10 @@ class Program
             else if ((a == "--fps" || a == "-Fps") && i + 1 < args.Length) fpsArg = args[++i];
             else if ((a == "--mode" || a == "-Mode") && i + 1 < args.Length) modeArg = args[++i];
             else if ((a == "--flow" || a == "-Flow") && i + 1 < args.Length) flowArg = args[++i];
-            else if (a == "--verbose" || a == "-v") verbose = true;
         }
 
         _logFile = Path.Combine(gameDir, "lossless_bridge.log");
-        Log($"=== LosslessBridge Starting ===");
+        Log($"=== LosslessBridge Starting (Chapter Mode) ===");
         Log($"GameDir: {gameDir}");
 
         string dllPath = FindLosslessDll(gameDir, customDll);
@@ -302,7 +323,6 @@ class Program
         }
         Log($"Found Lossless.dll at: {dllPath}");
 
-        // Change working directory to Lossless.dll folder for proper resource resolution
         string lsDir = Path.GetDirectoryName(dllPath)!;
         Directory.SetCurrentDirectory(lsDir);
 
@@ -343,42 +363,37 @@ class Program
 
         string lastSyncedSettings = "";
         int noProcessTicks = 0;
-        bool hasEverSeenProcess = false;
-        int maxInitialWaitTicks = 120;   // 120 * 500ms = 60s wait at startup for DELTARUNE to appear
-        int maxTransitionWaitTicks = 60; // 60 * 500ms = 30s wait during chapter transitions
+        int maxNoProcessTicks = 30; // 30 * 500ms = 15s after DELTARUNE exits
 
         try
         {
             while (true)
             {
-                // 1. Check if DELTARUNE process is still alive
+                // 1. Check if DELTARUNE process is alive
                 bool deltaruneRunning = IsAnyDeltaruneProcessRunning();
                 if (deltaruneRunning)
                 {
-                    hasEverSeenProcess = true;
                     noProcessTicks = 0;
                 }
                 else
                 {
                     noProcessTicks++;
-                    int limit = hasEverSeenProcess ? maxTransitionWaitTicks : maxInitialWaitTicks;
-                    if (noProcessTicks > limit)
+                    if (noProcessTicks > maxNoProcessTicks)
                     {
-                        Log($"DELTARUNE not found after {limit * 0.5:F0}s (seen={hasEverSeenProcess}). Shutting down bridge.");
+                        Log("DELTARUNE process exited. Shutting down bridge.");
                         break;
                     }
                 }
 
-                // 2. Read dynamic settings from signal files (overrides CLI if present)
+                // 2. Read dynamic settings from signal files
                 string curFpsMode = ReadSignal("fps_mode.txt", gameDir, "lossless");
                 string curFpsVal  = ReadSignal("lsfg_fps.txt", gameDir, fpsArg);
                 string curPerfVal = ReadSignal("lsfg_mode.txt", gameDir, modeArg);
                 string curFlowVal = ReadSignal("lsfg_flow.txt", gameDir, flowArg);
-                string curDrawFps = ReadSignal("lsfg_drawfps.txt", gameDir, "1"); // default: show FPS HUD counter
+                string curDrawFps = ReadSignal("lsfg_drawfps.txt", gameDir, "1");
 
                 if (!curFpsMode.Equals("lossless", StringComparison.OrdinalIgnoreCase))
                 {
-                    // User switched framerate mode away from lossless scaling
                     Thread.Sleep(500);
                     continue;
                 }
@@ -386,7 +401,7 @@ class Program
                 string settingsKey = $"{curFpsVal}_{curPerfVal}_{curFlowVal}_{curDrawFps}";
                 if (settingsKey != lastSyncedSettings)
                 {
-                    float targetFps = 120.0f;
+                    float targetFps = 240.0f;
                     if (float.TryParse(curFpsVal, out float tf) && tf > 0) targetFps = tf;
 
                     int perfMode = curPerfVal.Equals("performance", StringComparison.OrdinalIgnoreCase) ? 1 : 0;
@@ -395,11 +410,6 @@ class Program
 
                     bool showFps = !curDrawFps.Equals("0", StringComparison.OrdinalIgnoreCase) && !curDrawFps.Equals("false", StringComparison.OrdinalIgnoreCase);
 
-                    // DELTARUNE base engine is 30 FPS.
-                    // Multipliers:
-                    // <= 60 FPS -> x2 (30 * 2 = 60)
-                    // <= 90 FPS -> x3 (30 * 3 = 90)
-                    // >= 120 FPS -> x4 (30 * 4 = 120) with target pacing
                     float multiplier = 4.0f;
                     int fgMode = 1; // 1 = ADAPTIVE
                     if (targetFps <= 60.0f)
@@ -420,37 +430,37 @@ class Program
                     else
                     {
                         multiplier = 4.0f;
-                        fgMode = 1; // ADAPTIVE (targets up to targetFps, e.g. 144 / 240 / 360)
+                        fgMode = 1; // ADAPTIVE
                     }
 
                     Log($"Applying settings: TargetFPS={targetFps}, Mode={(perfMode == 1 ? "Performance" : "Balanced")}, Flow={flowScale}%, Mult={multiplier}x, FGMode={(fgMode == 1 ? "ADAPTIVE" : "FIXED")}, DrawFps={showFps}, GSync=true, MaxLatency=3, QueueTarget=1");
 
                     ApplySettings(
-                        scalingMode: 0,                // 0 = Auto
+                        scalingMode: 0,
                         scalingFitMode: 0,             // 0 = AspectRatio (official DELTARUNE profile)
-                        scalingType: 0,                // 0 = Off (Pure frame generation)
+                        scalingType: 0,                // 0 = Off
                         scalingSubtype: 0,
                         scaleFactor: 1.0f,
                         resizeBeforeScale: false,
-                        sharpness: 5,                  // Official profile default
+                        sharpness: 5,
                         VRS: false,
-                        frameGenerationType: 1,        // 1 = LSFG 3.0
+                        frameGenerationType: 1,        // LSFG 3.0
                         frameGenerationSize: perfMode, // 0 = Balanced, 1 = Performance
-                        frameGenerationMode: fgMode,   // 0 = Fixed, 1 = Adaptive
+                        frameGenerationMode: fgMode,
                         frameGenerationMultiplier: multiplier,
                         frameGenerationTarget: targetFps,
                         frameGenerationFlowScale: flowScale,
-                        clipCursor: true,              // Matches official profile
+                        clipCursor: true,
                         cursorSensitivity: false,
                         hideCursor: false,
                         scaleCursor: false,
-                        syncMode: 1,                   // 1 = DEFAULT
-                        maxFrameLatency: 3,            // 3 = Official profile (prevents queue starvation at 30 FPS)
-                        gsyncSupport: true,            // true = Matches 360 Hz G-Sync display
+                        syncMode: 1,
+                        maxFrameLatency: 3,
+                        gsyncSupport: true,
                         hdrSupport: false,
-                        captureApi: 0,                 // 0 = DXGI
-                        queueTarget: 1,                // 1 = Matches official profile
-                        drawFps: showFps,              // true = Renders on-screen FPS counter (30 / 120 or 30 / 240)!
+                        captureApi: 0,
+                        queueTarget: 1,
+                        drawFps: showFps,
                         gpuId: 0,
                         displayId: 0,
                         captureOffsetLeft: 0,
@@ -465,31 +475,35 @@ class Program
                     Log("Settings successfully applied to Lossless.dll!");
                 }
 
-                // 3. Check if current attached window was destroyed
+                // 3. Window tracking & Activation
                 if (_currentHwnd != IntPtr.Zero && !IsWindow(_currentHwnd))
                 {
-                    Log($"Attached HWND 0x{_currentHwnd:X} was destroyed (chapter transition). Resetting window handle.");
+                    Log($"Attached HWND 0x{_currentHwnd:X} was closed. Resetting window handle.");
                     _currentHwnd = IntPtr.Zero;
+                    _currentStatus = 0;
                 }
 
-                // 4. Find and attach to DELTARUNE game window
                 IntPtr gameHwnd = FindDeltaruneWindow();
-                if (gameHwnd != IntPtr.Zero && gameHwnd != _currentHwnd)
+                if (gameHwnd != IntPtr.Zero)
                 {
-                    Log($"Found DELTARUNE HWND: 0x{gameHwnd:X}. Activating Lossless Scaling frame generation...");
-                    try
+                    if (gameHwnd != _currentHwnd)
                     {
-                        bool actOk = Activate(gameHwnd);
-                        Log($"Activate(0x{gameHwnd:X}) result: {actOk}");
-                        if (actOk)
+                        Log($"Found Chapter window HWND: 0x{gameHwnd:X}. Activating Lossless Scaling frame generation...");
+                        if (TryActivate(gameHwnd))
                         {
                             _currentHwnd = gameHwnd;
-                            Log($"*** Successfully hooked Lossless Scaling to DELTARUNE (0x{gameHwnd:X})! ***");
+                            Log($"*** Successfully hooked Lossless Scaling to Chapter (0x{gameHwnd:X})! ***");
                         }
                     }
-                    catch (Exception ex)
+                    else if (_currentStatus != 2 && (DateTime.UtcNow - _lastActivateTime).TotalSeconds >= 2.0)
                     {
-                        Log($"Activate exception: {ex.Message}");
+                        // Window is attached but status is not Active (e.g. TempDisabled or focus was lost)
+                        IntPtr fg = GetForegroundWindow();
+                        if (fg == _currentHwnd)
+                        {
+                            Log($"Window 0x{_currentHwnd:X} is in foreground but status is {_currentStatus}. Re-activating...");
+                            TryActivate(_currentHwnd);
+                        }
                     }
                 }
 
