@@ -691,7 +691,11 @@ function Start-LosslessScalingIfEnabled {
             $running = Get-Process -Name "LosslessBridge" -ErrorAction SilentlyContinue | Select-Object -First 1
             if (-not $running) {
                 $bDir = Split-Path -Path $bridgeExe -Parent
-                $null = Start-Process -FilePath $bridgeExe -ArgumentList @("--game-dir", $cfg.GameDir) -WorkingDirectory $bDir -WindowStyle Hidden -PassThru
+                $curFps = Get-LsfgFpsSetting $cfg
+                $curLsfgMode = Get-LsfgModeSetting $cfg
+                $curLsfgFlow = Get-LsfgFlowSetting $cfg
+                $bridgeArgs = @("--game-dir", $cfg.GameDir, "--fps", $curFps, "--mode", $curLsfgMode, "--flow", $curLsfgFlow)
+                $null = Start-Process -FilePath $bridgeExe -ArgumentList $bridgeArgs -WorkingDirectory $bDir -WindowStyle Hidden -PassThru
                 $script:StartedLosslessBridge = $true
             }
             return
@@ -1595,7 +1599,7 @@ function Start-ModLoader {
             $alive = @(Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.ProcessName -like '*ELTARUNE*' })
             if ($alive.Count -gt 0) { $sawGame = $true; $goneCount = 0 }
             elseif ($sawGame) { $goneCount++ }
-            if ($sawGame -and $goneCount -ge 80) { break }  # ~12s ohne Prozess = echtes Beenden (uebersteht Kapitelwechsel problemlos)
+            if ($sawGame -and $goneCount -ge 120) { break }  # ~18s ohne Prozess = echtes Beenden (uebersteht Kapitelwechsel problemlos)
 
             Start-Sleep -Milliseconds 150
         }

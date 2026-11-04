@@ -89,6 +89,18 @@ class Program
     [DllImport("user32.dll")]
     static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
 
+    [StructLayout(LayoutKind.Sequential)]
+    public struct RECT
+    {
+        public int Left;
+        public int Top;
+        public int Right;
+        public int Bottom;
+    }
+
+    [DllImport("user32.dll")]
+    static extern bool GetClientRect(IntPtr hWnd, out RECT lpRect);
+
     delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
 
     [DllImport("user32.dll")]
@@ -98,6 +110,8 @@ class Program
     static string _logFile = "";
     static bool _initialized = false;
     static IntPtr _currentHwnd = IntPtr.Zero;
+    static int _currentStatus = 0;
+    static float _lastGeneratedFps = 0.0f;
 
     static void Log(string msg)
     {
@@ -109,8 +123,11 @@ class Program
         }
     }
 
-    static void OnStatus(int status, IntPtr hwnd, int a2, int a3, int a4, int a5, bool a6, float a7, int a8)
+    static void OnStatus(int status, IntPtr hwnd, int arg2, int arg3, int arg4, int arg5, bool arg6, float arg7, int arg8)
     {
+        _currentStatus = status;
+        _lastGeneratedFps = arg7;
+
         // status: 0=Disabled, 1=TempDisabled, 2=Enabled, 3=Countdown
         string statusStr = status switch
         {
@@ -120,7 +137,33 @@ class Program
             3 => "Countdown",
             _ => status.ToString()
         };
-        Log($"[STATUS] {statusStr} for HWND=0x{hwnd:X}");
+        Log($"[STATUS] {statusStr} (HWND=0x{hwnd:X}, ErrorCode={arg2}, FPS={arg7:F1}, a3={arg3}, a4={arg4}, a5={arg5}, a6={arg6}, a8={arg8})");
+    }
+
+    static string ReadSignal(string filename, string gameDir, string defaultValue)
+    {
+        string localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        string[] candidates = new string[]
+        {
+            Path.Combine(localAppData, "DELTARUNE", filename),
+            Path.Combine(gameDir, "signal", filename),
+            Path.Combine(gameDir, filename)
+        };
+
+        foreach (var p in candidates)
+        {
+            try
+            {
+                if (File.Exists(p))
+                {
+                    string content = File.ReadAllText(p).Trim();
+                    if (!string.IsNullOrEmpty(content))
+                        return content;
+                }
+            }
+            catch {}
+        }
+        return defaultValue;
     }
 
     static string FindLosslessDll(string gameDir, string customDllPath)
@@ -174,6 +217,14 @@ class Program
         {
             if (!IsWindow(hwnd) || !IsWindowVisible(hwnd)) return true;
 
+            // Make sure the window has a valid drawing area (avoid dummy/hidden windows)
+            if (GetClientRect(hwnd, out RECT rc))
+            {
+                int w = rc.Right - rc.Left;
+                int h = rc.Bottom - rc.Top;
+                if (w < 200 || h < 150) return true;
+            }
+
             GetWindowThreadProcessId(hwnd, out uint pid);
             try
             {
@@ -201,6 +252,21 @@ class Program
         }, IntPtr.Zero);
 
         return found;
+    }
+
+    static bool IsAnyDeltaruneProcessRunning()
+    {
+        try
+        {
+            var procs = Process.GetProcesses();
+            foreach (var p in procs)
+            {
+                if (p.ProcessName.IndexOf("DELTARUNE", StringComparison.OrdinalIgnoreCase) >= 0)
+                    return true;
+            }
+        }
+        catch {}
+        return false;
     }
 
     [STAThread]
@@ -276,104 +342,115 @@ class Program
         }
 
         string lastSyncedSettings = "";
-        int noProcessCount = 0;
+        int noProcessTicks = 0;
+        bool hasEverSeenProcess = false;
+        int maxInitialWaitTicks = 120;   // 120 * 500ms = 60s wait at startup for DELTARUNE to appear
+        int maxTransitionWaitTicks = 60; // 60 * 500ms = 30s wait during chapter transitions
 
         try
         {
             while (true)
             {
                 // 1. Check if DELTARUNE process is still alive
-                var procs = Process.GetProcessesByName("DELTARUNE");
-                if (procs.Length == 0)
+                bool deltaruneRunning = IsAnyDeltaruneProcessRunning();
+                if (deltaruneRunning)
                 {
-                    // Case-insensitive check
-                    var allProcs = Process.GetProcesses();
-                    bool anyDeltarune = false;
-                    foreach (var p in allProcs)
-                    {
-                        if (p.ProcessName.IndexOf("DELTARUNE", StringComparison.OrdinalIgnoreCase) >= 0)
-                        {
-                            anyDeltarune = true;
-                            break;
-                        }
-                    }
-
-                    if (!anyDeltarune)
-                    {
-                        noProcessCount++;
-                        if (noProcessCount > 8) // ~4 seconds without DELTARUNE
-                        {
-                            Log("DELTARUNE process exited. Shutting down bridge.");
-                            break;
-                        }
-                    }
-                    else
-                    {
-                        noProcessCount = 0;
-                    }
+                    hasEverSeenProcess = true;
+                    noProcessTicks = 0;
                 }
                 else
                 {
-                    noProcessCount = 0;
+                    noProcessTicks++;
+                    int limit = hasEverSeenProcess ? maxTransitionWaitTicks : maxInitialWaitTicks;
+                    if (noProcessTicks > limit)
+                    {
+                        Log($"DELTARUNE not found after {limit * 0.5:F0}s (seen={hasEverSeenProcess}). Shutting down bridge.");
+                        break;
+                    }
                 }
 
                 // 2. Read dynamic settings from signal files (overrides CLI if present)
-                string signalDir = Path.Combine(gameDir, "signal");
-                string modeFile  = Path.Combine(signalDir, "fps_mode.txt");
-                string fpsFile   = Path.Combine(signalDir, "lsfg_fps.txt");
-                string perfFile  = Path.Combine(signalDir, "lsfg_mode.txt");
-                string flowFile  = Path.Combine(signalDir, "lsfg_flow.txt");
+                string curFpsMode = ReadSignal("fps_mode.txt", gameDir, "lossless");
+                string curFpsVal  = ReadSignal("lsfg_fps.txt", gameDir, fpsArg);
+                string curPerfVal = ReadSignal("lsfg_mode.txt", gameDir, modeArg);
+                string curFlowVal = ReadSignal("lsfg_flow.txt", gameDir, flowArg);
+                string curDrawFps = ReadSignal("lsfg_drawfps.txt", gameDir, "1"); // default: show FPS HUD counter
 
-                string curFpsMode = File.Exists(modeFile) ? File.ReadAllText(modeFile).Trim() : "lossless";
-                string curFpsVal  = File.Exists(fpsFile)  ? File.ReadAllText(fpsFile).Trim()  : fpsArg;
-                string curPerfVal = File.Exists(perfFile) ? File.ReadAllText(perfFile).Trim() : modeArg;
-                string curFlowVal = File.Exists(flowFile) ? File.ReadAllText(flowFile).Trim() : flowArg;
-
-                if (curFpsMode != "lossless")
+                if (!curFpsMode.Equals("lossless", StringComparison.OrdinalIgnoreCase))
                 {
-                    // User disabled lossless scaling in settings
+                    // User switched framerate mode away from lossless scaling
                     Thread.Sleep(500);
                     continue;
                 }
 
-                string settingsKey = $"{curFpsVal}_{curPerfVal}_{curFlowVal}";
+                string settingsKey = $"{curFpsVal}_{curPerfVal}_{curFlowVal}_{curDrawFps}";
                 if (settingsKey != lastSyncedSettings)
                 {
                     float targetFps = 120.0f;
                     if (float.TryParse(curFpsVal, out float tf) && tf > 0) targetFps = tf;
 
-                    int perfMode = (curPerfVal.Equals("performance", StringComparison.OrdinalIgnoreCase)) ? 1 : 0; // 0=Balanced, 1=Performance
+                    int perfMode = curPerfVal.Equals("performance", StringComparison.OrdinalIgnoreCase) ? 1 : 0;
                     int flowScale = 100;
                     if (int.TryParse(curFlowVal, out int fs) && fs > 0) flowScale = fs;
 
-                    Log($"Applying settings: TargetFPS={targetFps}, Mode={(perfMode == 1 ? "Performance" : "Balanced")}, Flow={flowScale}%");
+                    bool showFps = !curDrawFps.Equals("0", StringComparison.OrdinalIgnoreCase) && !curDrawFps.Equals("false", StringComparison.OrdinalIgnoreCase);
+
+                    // DELTARUNE base engine is 30 FPS.
+                    // Multipliers:
+                    // <= 60 FPS -> x2 (30 * 2 = 60)
+                    // <= 90 FPS -> x3 (30 * 3 = 90)
+                    // >= 120 FPS -> x4 (30 * 4 = 120) with target pacing
+                    float multiplier = 4.0f;
+                    int fgMode = 1; // 1 = ADAPTIVE
+                    if (targetFps <= 60.0f)
+                    {
+                        multiplier = 2.0f;
+                        fgMode = 0; // FIXED x2
+                    }
+                    else if (targetFps <= 90.0f)
+                    {
+                        multiplier = 3.0f;
+                        fgMode = 0; // FIXED x3
+                    }
+                    else if (targetFps <= 120.0f)
+                    {
+                        multiplier = 4.0f;
+                        fgMode = 0; // FIXED x4
+                    }
+                    else
+                    {
+                        multiplier = 4.0f;
+                        fgMode = 1; // ADAPTIVE (targets up to targetFps, e.g. 144 / 240 / 360)
+                    }
+
+                    Log($"Applying settings: TargetFPS={targetFps}, Mode={(perfMode == 1 ? "Performance" : "Balanced")}, Flow={flowScale}%, Mult={multiplier}x, FGMode={(fgMode == 1 ? "ADAPTIVE" : "FIXED")}, DrawFps={showFps}, GSync=true, MaxLatency=3, QueueTarget=1");
 
                     ApplySettings(
-                        scalingMode: 0,
-                        scalingFitMode: 1,
-                        scalingType: 0, // Off (No spatial upscaling, pure frame generation)
+                        scalingMode: 0,                // 0 = Auto
+                        scalingFitMode: 0,             // 0 = AspectRatio (official DELTARUNE profile)
+                        scalingType: 0,                // 0 = Off (Pure frame generation)
                         scalingSubtype: 0,
                         scaleFactor: 1.0f,
                         resizeBeforeScale: false,
-                        sharpness: 0,
+                        sharpness: 5,                  // Official profile default
                         VRS: false,
-                        frameGenerationType: 1, // LSFG 3.0 / 2.3
-                        frameGenerationSize: perfMode, // 0=Balanced, 1=Performance
-                        frameGenerationMode: 1, // 1=Adaptive target
-                        frameGenerationMultiplier: 2.0f,
+                        frameGenerationType: 1,        // 1 = LSFG 3.0
+                        frameGenerationSize: perfMode, // 0 = Balanced, 1 = Performance
+                        frameGenerationMode: fgMode,   // 0 = Fixed, 1 = Adaptive
+                        frameGenerationMultiplier: multiplier,
                         frameGenerationTarget: targetFps,
                         frameGenerationFlowScale: flowScale,
-                        clipCursor: false,
+                        clipCursor: true,              // Matches official profile
                         cursorSensitivity: false,
                         hideCursor: false,
                         scaleCursor: false,
-                        syncMode: 1, // Default Sync
-                        maxFrameLatency: 1,
-                        gsyncSupport: false,
+                        syncMode: 1,                   // 1 = DEFAULT
+                        maxFrameLatency: 3,            // 3 = Official profile (prevents queue starvation at 30 FPS)
+                        gsyncSupport: true,            // true = Matches 360 Hz G-Sync display
                         hdrSupport: false,
-                        captureApi: 0, // DXGI
-                        queueTarget: 0,
-                        drawFps: false,
+                        captureApi: 0,                 // 0 = DXGI
+                        queueTarget: 1,                // 1 = Matches official profile
+                        drawFps: showFps,              // true = Renders on-screen FPS counter (30 / 120 or 30 / 240)!
                         gpuId: 0,
                         displayId: 0,
                         captureOffsetLeft: 0,
@@ -388,15 +465,22 @@ class Program
                     Log("Settings successfully applied to Lossless.dll!");
                 }
 
-                // 3. Find and attach to DELTARUNE game window
+                // 3. Check if current attached window was destroyed
+                if (_currentHwnd != IntPtr.Zero && !IsWindow(_currentHwnd))
+                {
+                    Log($"Attached HWND 0x{_currentHwnd:X} was destroyed (chapter transition). Resetting window handle.");
+                    _currentHwnd = IntPtr.Zero;
+                }
+
+                // 4. Find and attach to DELTARUNE game window
                 IntPtr gameHwnd = FindDeltaruneWindow();
                 if (gameHwnd != IntPtr.Zero && gameHwnd != _currentHwnd)
                 {
-                    Log($"Found new DELTARUNE HWND: 0x{gameHwnd:X}. Activating Lossless Scaling frame generation...");
+                    Log($"Found DELTARUNE HWND: 0x{gameHwnd:X}. Activating Lossless Scaling frame generation...");
                     try
                     {
                         bool actOk = Activate(gameHwnd);
-                        Log($"Activate result: {actOk}");
+                        Log($"Activate(0x{gameHwnd:X}) result: {actOk}");
                         if (actOk)
                         {
                             _currentHwnd = gameHwnd;
