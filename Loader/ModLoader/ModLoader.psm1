@@ -59,11 +59,12 @@ public class WinHelper {
     }
 
     public static bool TriggerLssHotkey(IntPtr hWnd) {
-        if (hWnd != IntPtr.Zero) {
-            ShowWindow(hWnd, SW_RESTORE);
-            SetForegroundWindow(hWnd);
-            System.Threading.Thread.Sleep(250);
+        if (hWnd == IntPtr.Zero || !IsWindowVisible(hWnd)) {
+            return false;
         }
+        ShowWindow(hWnd, SW_RESTORE);
+        SetForegroundWindow(hWnd);
+        System.Threading.Thread.Sleep(250);
         keybd_event(VK_CONTROL, 0, 0, UIntPtr.Zero);
         keybd_event(VK_MENU, 0, 0, UIntPtr.Zero);
         keybd_event(VK_S, 0, 0, UIntPtr.Zero);
@@ -783,6 +784,9 @@ function Start-LosslessScalingIfEnabled {
 }
 
 function Stop-LosslessScalingIfStarted {
+    try {
+        cmd /c "taskkill /f /im LosslessBridge.exe /im LosslessScaling.exe >nul 2>nul"
+    } catch {}
     try {
         Get-Process -Name "LosslessBridge" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
     } catch {}
@@ -1507,7 +1511,6 @@ function Start-ModLoader {
 
     # First-run prompt & startup for Lossless Scaling (best-effort; never blocks game launch)
     try { Invoke-LosslessScalingFirstRunCheck $cfg } catch {}
-    try { Start-LosslessScalingIfEnabled $cfg } catch {}
 
     $startParams = @{ FilePath = $GameExe; WorkingDirectory = $GameDir; PassThru = $true }
     if ($GameArgs -and $GameArgs.Count -gt 0) { $startParams.ArgumentList = $GameArgs }
@@ -1515,22 +1518,49 @@ function Start-ModLoader {
 
     # WICHTIG: Deltarunes game_change startet bei JEDEM Kapitelwechsel einen
     # neuen Prozess. Deshalb ueberwachen wir NICHT einen einzelnen PID, sondern
-    # ob ueberhaupt noch ein Deltarune-Prozess laeuft. Erst wenn ~3s lang keiner
-    # mehr da ist (echtes Beenden), raeumen wir auf. So ueberlebt der Loader die
-    # Kapitelwechsel und bedient auch weitere Mod-Anfragen.
-    $sawGame         = $false
-    $goneCount       = 0
-    $lastSyncedFps   = Get-LsfgFpsSetting $cfg
-    $lastSyncedMode  = Get-LsfgModeSetting $cfg
-    $lastSyncedFlow  = Get-LsfgFlowSetting $cfg
+    # ob ueberhaupt noch ein Deltarune-Prozess laeuft.
+    $sawGame           = $false
+    $goneCount         = 0
+    $lastSyncedFps     = Get-LsfgFpsSetting $cfg
+    $lastSyncedMode    = Get-LsfgModeSetting $cfg
+    $lastSyncedFlow    = Get-LsfgFlowSetting $cfg
     $chapterActive     = $false
     $waitingForChapter = $false
     $chapterLaunchTime = [DateTime]::MinValue
     $hookedLss         = $false
+
     # Do not start Lossless Scaling in the Hub menu
     Stop-LosslessScalingIfStarted
+
     try {
         while ($true) {
+            # 1. Process Aliveness Check (first priority!)
+            $alive = @(Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.ProcessName -like '*ELTARUNE*' })
+            if ($alive.Count -gt 0) {
+                $sawGame = $true
+                $goneCount = 0
+            } elseif ($sawGame) {
+                $goneCount++
+                # DELTARUNE is NOT running!
+                # Instantly kill Lossless Scaling and cancel active chapter state so it NEVER tries to hook another window!
+                Stop-LosslessScalingIfStarted
+                $chapterActive = $false
+                $hookedLss = $false
+
+                if (-not $waitingForChapter) {
+                    # User closed the game (Alt+F4 or Quit to Desktop).
+                    # Exit cleanly within ~750ms (5 ticks).
+                    if ($goneCount -ge 5) { break }
+                } else {
+                    # We are in the middle of a chapter transition (~game_change).
+                    # Allow up to 12 seconds (~80 ticks) for the new chapter process to launch.
+                    if ($goneCount -ge 80) { break }
+                }
+                Start-Sleep -Milliseconds 150
+                continue
+            }
+
+            # 2. In-Game Mod Requests
             $req = Read-Request $cfg
             if ($req) {
                 # A new request means the previous chapter is done -> persist its
@@ -1555,6 +1585,7 @@ function Start-ModLoader {
                 }
             }
 
+            # 3. Profile Commands
             # In-game profile management (create / delete a profile folder).
             $pcmd = Read-ProfileCmd $cfg
             if ($pcmd) {
@@ -1568,6 +1599,7 @@ function Start-ModLoader {
                 Set-ProfileReady $cfg
             }
 
+            # 4. Mod Tools Commands
             # In-game mod tools (check updates / process auto-import / scan lossless scaling).
             $tcmd = Read-ModToolsCmd $cfg
             if ($tcmd) {
@@ -1612,6 +1644,7 @@ function Start-ModLoader {
                 }
             }
 
+            # 5. Framerate / LSFG Settings Sync
             # If in-game menu changed target FPS or mode, update profile
             $curMode     = Get-FramerateModeSetting $cfg
             $curFps      = Get-LsfgFpsSetting $cfg
@@ -1626,17 +1659,17 @@ function Start-ModLoader {
                 }
             }
 
-            # Chapter loaded detection:
+            # 6. Chapter Launch & LSS Hooking
             # Wait ~3.5 seconds after chapter launch for GameMaker to create and show the new window,
             # then start Lossless Scaling headless and send Ctrl + Alt + S to DELTARUNE!
             if ($waitingForChapter) {
                 $elapsedSec = ([DateTime]::UtcNow - $chapterLaunchTime).TotalSeconds
                 if ($elapsedSec -ge 3.5) {
                     $hwnd = [WinHelper]::FindDeltaruneWindow()
-                    if ($hwnd -ne [IntPtr]::Zero -or $elapsedSec -ge 8.0) {
+                    if ($hwnd -ne [IntPtr]::Zero) {
                         $waitingForChapter = $false
                         $chapterActive = $true
-                        if ($curMode -eq 'lossless') {
+                        if ($curMode -eq 'lossless' -and -not $hookedLss) {
                             Start-LosslessScalingIfEnabled $cfg
                             Start-Sleep -Milliseconds 1200
                             $targetHwnd = [WinHelper]::FindDeltaruneWindow()
@@ -1645,35 +1678,11 @@ function Start-ModLoader {
                                 $hookedLss = $true
                             }
                         }
+                    } elseif ($elapsedSec -ge 12.0) {
+                        # Timeout waiting for chapter window
+                        $waitingForChapter = $false
                     }
                 }
-            }
-
-            # While in chapter, keep Lossless running
-            if ($chapterActive -and $curMode -eq 'lossless') {
-                $runningLossless = Get-Process -Name "*LosslessScaling*" -ErrorAction SilentlyContinue | Select-Object -First 1
-                if (-not $runningLossless) {
-                    Start-LosslessScalingIfEnabled $cfg
-                    Start-Sleep -Milliseconds 1000
-                    $targetHwnd = [WinHelper]::FindDeltaruneWindow()
-                    if ($targetHwnd -ne [IntPtr]::Zero) {
-                        [WinHelper]::TriggerLssHotkey($targetHwnd)
-                    }
-                }
-            }
-
-            $alive = @(Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.ProcessName -like '*ELTARUNE*' })
-            if ($alive.Count -gt 0) {
-                $sawGame = $true
-                $goneCount = 0
-            } elseif ($sawGame) {
-                $goneCount++
-                # If DELTARUNE was closed (e.g. Alt+F4), immediately kill Lossless Scaling!
-                # Do not wait 18 seconds - killing it within 300ms guarantees it NEVER latches onto the browser or desktop!
-                if ($goneCount -ge 2) {
-                    Stop-LosslessScalingIfStarted
-                }
-                if ($goneCount -ge 20) { break }  # ~3s without process = game closed, exit loader
             }
 
             Start-Sleep -Milliseconds 150
